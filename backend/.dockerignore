@@ -1,0 +1,14 @@
+venv/
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+uploads/
+chroma_data/
+.cache/
+.env
+.env.*
+.pytest_cache/

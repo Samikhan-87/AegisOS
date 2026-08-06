@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - ./documents:/app/documents
+      - ./chroma_data:/app/chroma_data
+
+    environment:
+      - BACKEND_PORT=${BACKEND_PORT:-8000}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5173}
+      - DATABASE_URL=${DATABASE_URL}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - HF_HOME=/app/.cache/huggingface
+      - SENTENCE_TRANSFORMERS_HOME=/app/.cache/huggingface
+
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: base
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Placeholder Postgres service (uncomment to enable)
+  # db:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_USER: aegis
+  #     POSTGRES_PASSWORD: aegis_password
+  #     POSTGRES_DB: aegis_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+
+  # Placeholder Redis service (uncomment to enable)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+
+# volumes:
+#   postgres_data:
