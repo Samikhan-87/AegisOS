@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import chat, documents
+from app.api.routes import agent_rag, chat, documents
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -33,4 +33,6 @@ def health_check():
 # API Routers
 app.include_router(chat.router, prefix=settings.API_V1_STR, tags=["chat"])
 app.include_router(documents.router, prefix=settings.API_V1_STR)
+app.include_router(agent_rag.router, prefix=settings.API_V1_STR)
+
 

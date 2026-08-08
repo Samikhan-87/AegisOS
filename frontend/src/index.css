@@ -2,24 +2,93 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: 'Poppins', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  transition: background-color 0.3s ease, color 0.3s ease;
+@layer base {
+  body {
+    margin: 0;
+    font-family: 'Outfit', 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
 }
 
-/* Custom scrollbars */
+/* 3D Iridescent Planetary Rotating Sphere (Aesthetic Light Blue / Cyan Palette) */
+@keyframes sphereRotate {
+  0% {
+    transform: rotate(0deg) translateY(0px);
+  }
+  50% {
+    transform: rotate(180deg) translateY(-8px);
+  }
+  100% {
+    transform: rotate(360deg) translateY(0px);
+  }
+}
+
+@keyframes innerGlobeSpin {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.iridescent-orb {
+  width: 105px;
+  height: 105px;
+  border-radius: 50%;
+  background: 
+    radial-gradient(circle at 32% 32%, rgba(255, 255, 255, 0.98) 0%, rgba(224, 242, 254, 0.5) 20%, transparent 65%),
+    conic-gradient(from 0deg at 50% 50%, #38bdf8, #06b6d4, #0284c7, #7dd3fc, #38bdf8);
+  background-size: 200% 200%;
+  box-shadow: 
+    inset -12px -12px 24px rgba(15, 23, 42, 0.85),
+    inset 12px 12px 24px rgba(255, 255, 255, 0.95),
+    0 15px 45px rgba(56, 189, 248, 0.4),
+    0 0 65px rgba(6, 182, 212, 0.35);
+  position: relative;
+  overflow: hidden;
+  animation: sphereRotate 24s linear infinite, innerGlobeSpin 12s ease-in-out infinite;
+  cursor: pointer;
+}
+
+.iridescent-orb::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: conic-gradient(from 180deg, transparent 0%, rgba(56, 189, 248, 0.45) 50%, transparent 100%);
+  animation: sphereRotate 16s linear infinite reverse;
+}
+
+.iridescent-orb::after {
+  content: '';
+  position: absolute;
+  top: 10%;
+  left: 15%;
+  width: 35%;
+  height: 25%;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  filter: blur(2.5px);
+  transform: rotate(-30deg);
+}
+
+/* Precision scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(150, 150, 150, 0.2);
-  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(150, 150, 150, 0.4);
+  background: rgba(255, 255, 255, 0.4);
 }

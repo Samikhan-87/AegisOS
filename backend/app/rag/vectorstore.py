@@ -25,8 +25,9 @@ import chromadb
 from app.core.config import settings
 
 # Initialize persistent ChromaDB client
-_chroma_client: chromadb.PersistentClient | None = None
+_chroma_client: Any = None
 _collection: Any = None
+
 
 
 def get_vector_collection() -> Any:

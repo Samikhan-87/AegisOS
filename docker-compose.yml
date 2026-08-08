@@ -14,12 +14,15 @@ services:
       - BACKEND_PORT=${BACKEND_PORT:-8000}
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DATABASE_URL=${DATABASE_URL}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - HF_HOME=/app/.cache/huggingface
       - SENTENCE_TRANSFORMERS_HOME=/app/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     restart: unless-stopped
+
 
   frontend:
     build:
@@ -32,10 +35,13 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://backend:8000
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
     depends_on:
       - backend
     restart: unless-stopped
+
 
   # Placeholder Postgres service (uncomment to enable)
   # db:
