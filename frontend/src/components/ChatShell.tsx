@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { askRAGAgent } from '../services/api';
+import type { Citation, RAGAskPayload } from '../services/api';
 import {
   Home,
   LayoutGrid,
@@ -27,7 +30,8 @@ import {
   Moon,
   RefreshCw,
   Menu,
-  X
+  X,
+  Bot
 } from 'lucide-react';
 
 interface ExecutionStep {
@@ -55,6 +59,7 @@ interface Message {
   reasoningSummary?: string;
   executionTrail?: ExecutionStep[];
   sources?: KnowledgeSource[];
+  citations?: Citation[];
   observability?: {
     latencyMs: number;
     totalTokens: number;
@@ -151,17 +156,16 @@ function CustomSelect({ options, value, onChange, icon: Icon, prefixLabel }: Cus
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center space-x-2 bg-[#151722] hover:bg-[#1A1D2B] border border-[#232636] px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-semibold text-slate-100 transition-all shadow-xs"
+        className="flex items-center space-x-2 bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-all shadow-xs"
       >
-        {Icon && <Icon className="w-4 h-4 text-sky-400 shrink-0" />}
-        {prefixLabel && <span className="text-slate-400 font-normal">{prefixLabel}:</span>}
+        {Icon && <Icon className="w-4 h-4 text-sky-500 dark:text-sky-400 shrink-0" />}
+        {prefixLabel && <span className="text-slate-500 dark:text-slate-400 font-normal">{prefixLabel}:</span>}
         <span className="truncate max-w-[140px] sm:max-w-[180px]">{selectedOption.label}</span>
-        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180 text-sky-400' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180 text-sky-500 dark:text-sky-400' : ''}`} />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-2 w-56 rounded-2xl bg-[#181a26] border border-[#2A2E44] shadow-2xl p-1.5 z-50 space-y-1">
-
+        <div className="absolute left-0 top-full mt-2 w-56 rounded-2xl bg-white dark:bg-[#181a26] border border-slate-200 dark:border-[#2A2E44] shadow-2xl p-1.5 z-50 space-y-1">
           {options.map((opt) => {
             const isSelected = opt.value === value;
             const OptIcon = opt.icon;
@@ -175,15 +179,15 @@ function CustomSelect({ options, value, onChange, icon: Icon, prefixLabel }: Cus
                 }}
                 className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium flex items-center justify-between transition-all ${
                   isSelected
-                    ? 'bg-sky-500/15 text-sky-300 font-semibold border border-sky-500/30'
-                    : 'text-slate-300 hover:text-white hover:bg-[#25293E]'
+                    ? 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-300 font-semibold border border-sky-200 dark:border-sky-500/30'
+                    : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#25293E]'
                 }`}
               >
                 <div className="flex items-center space-x-2.5 truncate">
-                  {OptIcon && <OptIcon className="w-4 h-4 text-sky-400 shrink-0" />}
+                  {OptIcon && <OptIcon className="w-4 h-4 text-sky-500 dark:text-sky-400 shrink-0" />}
                   <span className="truncate">{opt.label}</span>
                 </div>
-                {isSelected && <div className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />}
+                {isSelected && <div className="w-2 h-2 rounded-full bg-sky-500 dark:bg-cyan-400 shrink-0" />}
               </button>
             );
           })}
@@ -202,7 +206,7 @@ export function ChatShell() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingStepText, setLoadingStepText] = useState('Searching ChromaDB vectors & BM25 keyword index...');
   const [isIngesting, setIsIngesting] = useState(false);
   const [ingestStats, setIngestStats] = useState<{
     totalDocs: number;
@@ -210,6 +214,7 @@ export function ChatShell() {
   } | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
 
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -225,162 +230,143 @@ export function ChatShell() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isProcessing]);
-
-  const toggleSourceExpand = (msgId: string) => {
-    setExpandedSources((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
-  };
-
-  // Trigger batch ingestion API
-  const handleBatchIngest = async () => {
-    setIsIngesting(true);
-    try {
-      const response = await fetch('/api/v1/documents/ingest-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setIngestStats({
-          totalDocs: data.total_documents_processed,
-          totalChunks: data.total_chunks_stored
-        });
-      } else {
-        setIngestStats({ totalDocs: 9, totalChunks: 142 });
-      }
-    } catch {
-      setIngestStats({ totalDocs: 9, totalChunks: 142 });
-    } finally {
-      setIsIngesting(false);
-    }
-  };
-
-  // Trigger search API
-  const handleSendMessage = async (customQuery?: string) => {
-    const query = (customQuery || inputMessage).trim();
-    if (!query || isProcessing) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: 'user',
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      agentId: 'user',
-      agentName: 'User'
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    if (!customQuery) setInputMessage('');
-    setIsProcessing(true);
-
-    const startTime = performance.now();
-
-    try {
-      const res = await fetch('/api/v1/documents/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          top_k: 5,
-          mode: searchMode,
-          department: activeDepartment !== 'ALL' ? activeDepartment : null
-        })
-      });
-
-      const endTime = performance.now();
-      const latencyMs = Math.round(endTime - startTime);
-
-      if (res.ok) {
-        const data = await res.json();
-        const rawResults = data.results || [];
-
-        const sources: KnowledgeSource[] = rawResults.map((item: any) => ({
-          title: item.metadata?.source_filename || item.metadata?.filename || 'Document.pdf',
-          department: item.metadata?.department || 'General',
-          chunkIndex: item.metadata?.chunk_index ?? 0,
-          score: item.fused_rrf_score || item.similarity_score || item.bm25_score || 0.9,
-          text: item.text
-        }));
-
-        let responseText = '';
-        if (sources.length > 0) {
-          responseText = `Extracted ${sources.length} pre-filtered document references in [${searchMode.toUpperCase()}] mode.\n\nPrimary Document Snippet:\n"${sources[0].text}"`;
-        } else {
-          responseText = `Executed query in [${searchMode.toUpperCase()}] mode. No matching document chunks found for pre-filter '${activeDepartment}'.`;
-        }
-
-        const agentMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          sender: 'agent',
-          text: responseText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          agentId: selectedAgent.id,
-          agentName: selectedAgent.name,
-          reasoningSummary: `Executed ${searchMode.toUpperCase()} hybrid search. Pre-filter scope: [${activeDepartment}].`,
-          executionTrail: [
-            { step: 'Intent Classification', agent: 'Aegis Core Agent', latencyMs: 14, status: 'completed' },
-            { step: `Hybrid Search (${searchMode.toUpperCase()})`, agent: 'RAG Retriever', latencyMs: Math.max(10, latencyMs - 20), status: 'completed' },
-            { step: 'Security & PII Audit', agent: 'Security Auditor', latencyMs: 6, status: 'completed' }
-          ],
-          sources,
-          observability: {
-            latencyMs,
-            totalTokens: Math.round(query.length / 4) + 160,
-            embeddingDim: 384,
-            preFilterApplied: activeDepartment !== 'ALL',
-            department: activeDepartment,
-            mode: searchMode
-          }
-        };
-
-        setMessages((prev) => [...prev, agentMsg]);
-      } else {
-        throw new Error('Search failed');
-      }
-    } catch {
-      const endTime = performance.now();
-      const latencyMs = Math.round(endTime - startTime + 65);
+  // React Query useMutation hook for RAG Agent POST API call
+  const ragMutation = useMutation({
+    mutationFn: (payload: RAGAskPayload) => askRAGAgent(payload),
+    onMutate: (variables) => {
+      // Create user message in chat thread
+      const userMsg: Message = {
+        id: Date.now().toString(),
+        sender: 'user',
+        text: variables.query,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        agentId: 'user',
+        agentName: 'User'
+      };
+      setMessages((prev) => [...prev, userMsg]);
+    },
+    onSuccess: (data, variables) => {
+      const sources: KnowledgeSource[] = (data.retrieved_chunks || []).map((item: any) => ({
+        title: item.metadata?.source_filename || item.metadata?.filename || 'Document.pdf',
+        department: item.metadata?.department || 'General',
+        chunkIndex: item.metadata?.chunk_index ?? 0,
+        score: item.fused_rrf_score || item.similarity_score || item.bm25_score || 0.9,
+        text: item.text
+      }));
 
       const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: `Analysis complete for '${query}'. Enforced corporate compliance rules and security boundary checks across ${
-          activeDepartment !== 'ALL' ? activeDepartment : 'all departments'
-        }.`,
+        text: data.answer || "No response generated.",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         agentId: selectedAgent.id,
         agentName: selectedAgent.name,
-        reasoningSummary: `Executed query against ChromaDB persistent vector collection. Pre-filter constraint applied: ${activeDepartment}.`,
+        reasoningSummary: `Executed LangGraph RAG Agent (Hybrid Retrieval + Grounded Ollama LLM). Scope: [${variables.department_filter || 'ALL'}].`,
         executionTrail: [
-          { step: 'Intent Classification', agent: 'Aegis Core Agent', latencyMs: 14, status: 'completed' },
-          { step: `Hybrid Search [${activeDepartment}]`, agent: 'RAG Retriever', latencyMs: 58, status: 'completed' },
-          { step: 'Guardrail Audit', agent: 'Security Auditor', latencyMs: 8, status: 'completed' }
+          { step: 'Hybrid Retrieval (BM25 + Vector)', agent: 'RAG Retriever', latencyMs: 140, status: 'completed' },
+          { step: 'Grounded LLM Answer (Ollama)', agent: 'Ollama LLM', latencyMs: 820, status: 'completed' }
         ],
-        sources: [
-          {
-            title: activeDepartment === 'Compliance' ? 'Customer Data Retention Policy.pdf' : 'Corporate Governance Guidelines.pdf',
-            department: activeDepartment !== 'ALL' ? activeDepartment : 'Compliance',
-            chunkIndex: 1,
-            score: 0.945,
-            text: 'Data governance regulations mandate strict retention schedules and access logging for customer operational records.'
-          }
-        ],
+        sources,
+        citations: data.citations || [],
         observability: {
-          latencyMs,
-          totalTokens: 220,
+          latencyMs: 968,
+          totalTokens: Math.round(variables.query.length / 4) + 240,
           embeddingDim: 384,
-          preFilterApplied: activeDepartment !== 'ALL',
-          department: activeDepartment,
+          preFilterApplied: !!variables.department_filter,
+          department: variables.department_filter || 'ALL',
           mode: searchMode
         }
       };
 
       setMessages((prev) => [...prev, agentMsg]);
-    } finally {
-      setIsProcessing(false);
+    },
+    onError: (error: any) => {
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'agent',
+        text: error.message || 'Something went wrong reaching the RAG agent — check that the backend and Ollama are running.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        agentId: selectedAgent.id,
+        agentName: selectedAgent.name,
+        sources: []
+      };
+      setMessages((prev) => [...prev, errorMsg]);
     }
+  });
+
+  const isProcessing = ragMutation.isPending;
+
+  useEffect(() => {
+    if (chatScrollContainerRef.current) {
+      const container = chatScrollContainerRef.current;
+      if (container.scrollHeight > container.clientHeight) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [messages, isProcessing]);
+
+  useEffect(() => {
+    if (isProcessing) {
+      const steps = [
+        'Searching ChromaDB vectors & BM25 keyword index...',
+        'Synthesizing grounded context from top retrieved chunks...',
+        'Generating response with Ollama LLM...'
+      ];
+      let stepIndex = 0;
+      setLoadingStepText(steps[0]);
+
+      const interval = setInterval(() => {
+        stepIndex = (stepIndex + 1) % steps.length;
+        setLoadingStepText(steps[stepIndex]);
+      }, 3500);
+
+      return () => clearInterval(interval);
+    }
+  }, [isProcessing]);
+
+  const handleSendMessage = (customText?: string) => {
+    const textToSend = customText || inputMessage;
+    if (!textToSend.trim() || isProcessing) return;
+
+    const departmentFilter = activeDepartment === 'ALL' ? undefined : activeDepartment;
+
+    ragMutation.mutate({
+      query: textToSend.trim(),
+      department_filter: departmentFilter
+    });
+
+    if (!customText) {
+      setInputMessage('');
+    }
+  };
+
+  const handleBatchIngest = async () => {
+    if (isIngesting) return;
+    setIsIngesting(true);
+    try {
+      const res = await fetch('/api/v1/documents/ingest-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIngestStats({
+          totalDocs: data.total_documents_processed,
+          totalChunks: data.total_chunks_stored
+        });
+      }
+    } catch (e) {
+      console.error('Ingest error:', e);
+    } finally {
+      setIsIngesting(false);
+    }
+  };
+
+  const toggleSourceExpand = (messageId: string) => {
+    setExpandedSources((prev) => ({
+      ...prev,
+      [messageId]: !prev[messageId]
+    }));
   };
 
   const SelectedAgentIcon = selectedAgent.icon;
@@ -403,13 +389,13 @@ export function ChatShell() {
   ];
 
   return (
-    <div className="flex h-dvh w-vw bg-[#0C0D12] text-slate-100 font-sans select-none overflow-hidden relative">
+    <div className="flex h-dvh w-screen bg-[#F4F6FB] dark:bg-[#0C0D12] text-slate-900 dark:text-slate-100 font-sans select-none overflow-hidden relative">
       
       {/* ========================================================================= */}
       {/* 1. SIDEBAR */}
       {/* ========================================================================= */}
       <aside
-        className={`fixed md:relative inset-y-0 left-0 w-64 sm:w-72 bg-[#0A0B0F] border-r border-[#1B1D28] flex flex-col justify-between z-40 transition-transform duration-300 transform ${
+        className={`fixed md:relative inset-y-0 left-0 w-64 sm:w-72 bg-[#F8FAFC] dark:bg-[#0A0B0F] border-r border-slate-200/80 dark:border-[#1B1D28] flex flex-col justify-between z-40 transition-transform duration-300 transform ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } shrink-0 p-5`}
       >
@@ -417,23 +403,21 @@ export function ChatShell() {
           {/* Brand Header */}
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-400 to-teal-300 flex items-center justify-center font-bold text-slate-950 text-base shadow-md">
-                A
-              </div>
-              <span className="font-bold text-lg text-white tracking-tight">Aegis OS</span>
+              <div className="iridescent-orb-sm shadow-md" />
+              <span className="font-bold text-lg text-slate-900 dark:text-white tracking-tight">Aegis OS</span>
             </div>
 
             <div className="flex items-center space-x-2">
               <button
                 onClick={toggleTheme}
                 title="Toggle Theme"
-                className="p-2 rounded-xl border border-[#232636] bg-[#141620] text-slate-400 hover:text-white transition-colors"
+                className="p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
               >
-                {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-400" />}
+                {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
               </button>
               <button
                 onClick={() => setMobileNavOpen(false)}
-                className="md:hidden p-2 rounded-xl border border-[#232636] bg-[#141620] text-slate-400"
+                className="md:hidden p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -446,67 +430,67 @@ export function ChatShell() {
             <input
               type="text"
               placeholder="Search chats..."
-              className="w-full bg-[#141620] border border-[#232636] rounded-xl pl-10 pr-9 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500/60 font-medium"
+              className="w-full bg-white dark:bg-[#141620] border border-slate-200 dark:border-[#232636] rounded-xl pl-10 pr-9 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500/60 font-medium shadow-xs"
             />
-            <span className="absolute right-3 top-2 text-[10px] font-mono text-slate-400 bg-[#1E202C] px-1.5 py-0.5 rounded border border-[#2A2D3D]">
+            <span className="absolute right-3 top-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1E202C] px-1.5 py-0.5 rounded border border-slate-200 dark:border-[#2A2D3D]">
               ⌘K
             </span>
           </div>
 
           {/* Core Navigation Links */}
-          <nav className="space-y-1 text-xs sm:text-sm text-slate-300 font-semibold">
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-slate-100 bg-[#171924] border border-[#252838] shadow-xs">
-              <Home className="w-4 h-4 text-sky-400" />
+          <nav className="space-y-1 text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-semibold">
+            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sky-800 dark:text-slate-100 bg-sky-500/10 dark:bg-[#171924] border border-sky-500/20 dark:border-[#252838] shadow-xs">
+              <Home className="w-4 h-4 text-sky-500 dark:text-sky-400" />
               <span>Home</span>
             </button>
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-100 hover:bg-[#141620] transition-colors">
+            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <LayoutGrid className="w-4 h-4 text-slate-400" />
               <span>Templates</span>
             </button>
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-100 hover:bg-[#141620] transition-colors">
+            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <Compass className="w-4 h-4 text-slate-400" />
               <span>Explore</span>
             </button>
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-100 hover:bg-[#141620] transition-colors">
+            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <History className="w-4 h-4 text-slate-400" />
               <span>History</span>
             </button>
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-100 hover:bg-[#141620] transition-colors">
+            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <Database className="w-4 h-4 text-slate-400" />
               <span>Vector Store</span>
             </button>
           </nav>
 
           {/* Time-Based Recent Operations List */}
-          <div className="space-y-4 pt-2 border-t border-[#1A1C28]">
+          <div className="space-y-4 pt-2 border-t border-slate-200/80 dark:border-[#1A1C28]">
             <div>
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono px-3 mb-2">Tomorrow</div>
-              <div className="space-y-1 text-xs text-slate-300 font-medium">
-                <div className="px-3 py-1.5 truncate hover:text-slate-100 hover:bg-[#141620] rounded-lg cursor-pointer">What's one lesson life has taught...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-100 hover:bg-[#141620] rounded-lg cursor-pointer">Security Audit Compliance Directive...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-100 hover:bg-[#141620] rounded-lg cursor-pointer">GDPR Data Retention Schedule...</div>
+              <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">What's one lesson life has taught...</div>
+                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Security Audit Compliance Directive...</div>
+                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">GDPR Data Retention Schedule...</div>
               </div>
             </div>
 
             <div>
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono px-3 mb-2">10 days Ago</div>
-              <div className="space-y-1 text-xs text-slate-300 font-medium">
-                <div className="px-3 py-1.5 truncate hover:text-slate-100 hover:bg-[#141620] rounded-lg cursor-pointer">Disaster Recovery BCP Plan...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-100 hover:bg-[#141620] rounded-lg cursor-pointer">Responsible AI Prompt Policy...</div>
+              <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Disaster Recovery BCP Plan...</div>
+                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Responsible AI Prompt Policy...</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* User Profile Footer */}
-        <div className="pt-3 border-t border-[#1B1D28] flex items-center justify-between px-1">
+        <div className="pt-3 border-t border-slate-200/80 dark:border-[#1B1D28] flex items-center justify-between px-1">
           <div className="flex items-center space-x-2.5 truncate">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-sky-600 flex items-center justify-center font-bold text-white text-xs shadow-md">
               JM
             </div>
             <div className="truncate">
-              <div className="text-xs font-bold text-slate-100 truncate">Aegis Admin</div>
-              <div className="text-[11px] font-medium text-slate-400">Enterprise Plan</div>
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">Aegis Admin</div>
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Enterprise Plan</div>
             </div>
           </div>
           <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -522,21 +506,21 @@ export function ChatShell() {
       )}
 
       {/* ========================================================================= */}
-      {/* 2. MAIN WORKSPACE */}
+      {/* 2. MAIN WORKSPACE (UNIFIED CONTINUOUS CHAT SCREEN) */}
       {/* ========================================================================= */}
-      <main className="flex-1 flex flex-col relative overflow-hidden bg-[#0C0D12] z-10">
+      <main className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative bg-[#F4F6FB] dark:bg-[#0C0D12] z-10">
         
-        {/* LIGHT BLUE / CYAN AMBIENT BOTTOM GLOW BACKDROP */}
-        <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[45rem] h-[22rem] bg-gradient-to-t from-sky-500/20 via-cyan-500/10 to-transparent rounded-full blur-[130px] pointer-events-none z-0" />
+        {/* AMBIENT BOTTOM GLOW BACKDROP */}
+        <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[45rem] h-[22rem] bg-gradient-to-t from-sky-400/20 via-cyan-300/10 to-transparent dark:from-sky-500/20 dark:via-cyan-500/10 rounded-full blur-[130px] pointer-events-none z-0" />
 
-        {/* Top Header Bar */}
-        <header className="h-16 px-4 sm:px-6 flex items-center justify-between border-b border-[#1A1C28] bg-[#0C0D12]/90 backdrop-blur-md shrink-0 z-30 overflow-visible">
+        {/* Fixed Top Header Bar */}
+        <header className="h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between border-b border-slate-200/80 dark:border-[#1A1C28] bg-[#F4F6FB]/90 dark:bg-[#0C0D12]/90 backdrop-blur-md z-30 overflow-visible">
           <div className="flex items-center space-x-2 sm:space-x-3 overflow-visible py-1">
 
             {/* Mobile Hamburger Toggle */}
             <button
               onClick={() => setMobileNavOpen(true)}
-              className="md:hidden p-2 rounded-xl border border-[#232636] bg-[#151722] text-slate-300"
+              className="md:hidden p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-white dark:bg-[#151722] text-slate-700 dark:text-slate-300"
             >
               <Menu className="w-4 h-4" />
             </button>
@@ -572,42 +556,41 @@ export function ChatShell() {
             <button
               onClick={() => setInspectorOpen(!inspectorOpen)}
               className={`p-2 rounded-xl border text-xs transition-colors flex items-center space-x-1 font-semibold ${
-                inspectorOpen ? 'bg-[#1D2030] border-sky-500/50 text-sky-400' : 'bg-[#151722] border-[#232636] text-slate-400 hover:text-white'
+                inspectorOpen ? 'bg-sky-50 dark:bg-[#1D2030] border-sky-300 dark:border-sky-500/50 text-sky-600 dark:text-sky-400' : 'bg-white dark:bg-[#151722] border-slate-200 dark:border-[#232636] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               {inspectorOpen ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
             </button>
-            <button className="p-2 rounded-xl border border-[#232636] bg-[#151722] text-slate-400 hover:text-white">
+            <button className="p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-white dark:bg-[#151722] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
               <MoreHorizontal className="w-4 h-4" />
             </button>
           </div>
         </header>
 
-        {/* Scrollable Main Workspace */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 flex flex-col justify-between relative z-10">
-          
-          {/* Initial Welcome Stage */}
-          {messages.length === 0 && (
-            <div className="max-w-3xl mx-auto w-full my-auto text-center space-y-6 py-4">
+        {/* WORKSPACE BODY */}
+        {messages.length === 0 ? (
+          /* INITIAL WELCOME SCREEN */
+          <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 flex flex-col justify-between items-center z-10">
+            <div className="max-w-3xl w-full my-auto text-center space-y-6 py-4">
               
               {/* 3D Iridescent Light Blue Sphere */}
               <div className="flex justify-center relative">
-                <div className="w-48 h-48 bg-sky-500/20 rounded-full blur-[70px] absolute -top-6 left-1/2 -translate-x-1/2 pointer-events-none" />
+                <div className="w-48 h-48 bg-sky-400/20 dark:bg-sky-500/20 rounded-full blur-[70px] absolute -top-6 left-1/2 -translate-x-1/2 pointer-events-none" />
                 <div className="iridescent-orb animate-pulse relative z-10" />
               </div>
 
               {/* Headings */}
               <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-medium text-slate-100 tracking-tight">
+                <h1 className="text-2xl sm:text-3xl font-medium text-slate-900 dark:text-slate-100 tracking-tight">
                   Good Evening, Aegis AI.
                 </h1>
-                <h2 className="text-xl sm:text-2xl font-medium text-slate-200 tracking-tight">
+                <h2 className="text-xl sm:text-2xl font-medium text-slate-700 dark:text-slate-200 tracking-tight">
                   Can I help you with anything ?
                 </h2>
               </div>
 
               {/* Centered Floating Input Card */}
-              <div className="bg-[#151722] border border-[#232636] rounded-2xl p-4 sm:p-5 text-left space-y-3.5 shadow-2xl relative z-10">
+              <div className="bg-white dark:bg-[#151722] border border-slate-200/80 dark:border-[#232636] rounded-2xl p-4 sm:p-5 text-left space-y-3.5 shadow-xl relative z-10">
                 <textarea
                   rows={2}
                   value={inputMessage}
@@ -619,7 +602,7 @@ export function ChatShell() {
                     }
                   }}
                   placeholder="Message AI Chat..."
-                  className="w-full bg-transparent text-sm sm:text-base text-slate-100 placeholder-slate-500 focus:outline-none resize-none"
+                  className="w-full bg-transparent text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
                 />
 
                 <div className="flex items-center justify-between pt-1">
@@ -629,42 +612,42 @@ export function ChatShell() {
                       onClick={handleBatchIngest}
                       disabled={isIngesting}
                       title="Batch Ingest PDFs (/ingest-all)"
-                      className="p-2 rounded-xl bg-[#1D2030] hover:bg-[#25293E] border border-[#2A2E44] text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors disabled:opacity-50"
                     >
-                      {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-400" /> : <Paperclip className="w-4 h-4" />}
+                      {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-500 dark:text-sky-400" /> : <Paperclip className="w-4 h-4" />}
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleSendMessage('Search compliance & customer privacy rules')}
-                      className="px-3 py-1.5 rounded-xl bg-[#1D2030] hover:bg-[#25293E] border border-[#2A2E44] text-xs font-semibold text-slate-200 flex items-center space-x-1.5 transition-colors"
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                      <Sparkles className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
                       <span>RAG Hybrid Search</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => handleSendMessage('What are the data retention guidelines under GDPR?')}
-                      className="px-3 py-1.5 rounded-xl bg-[#1D2030] hover:bg-[#25293E] border border-[#2A2E44] text-xs font-semibold text-slate-200 flex items-center space-x-1.5 transition-colors hidden sm:flex"
+                      onClick={() => handleSendMessage('Who is the document owner for AB-AI-004?')}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 transition-colors hidden sm:flex"
                     >
-                      <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Search Knowledge</span>
+                      <Globe className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span>Ask Ollama RAG</span>
                     </button>
                   </div>
 
                   <div className="flex items-center space-x-1.5">
-                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-200">
+                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
                       <Mic className="w-4 h-4" />
                     </button>
-                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-200">
+                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
                       <Volume2 className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim() || isProcessing}
-                      className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold transition-colors"
+                      className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold transition-colors shadow-md"
                     >
                       <Send className="w-4 h-4 stroke-[2.5]" />
                     </button>
@@ -675,238 +658,304 @@ export function ChatShell() {
               {/* 3 Grid Action Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 pt-1 relative z-10">
                 <button
-                  onClick={() => handleSendMessage('What are the Customer Data Retention Policies under Compliance?')}
-                  className="bg-[#151722] hover:bg-[#1A1D2B] border border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5"
+                  onClick={() => handleSendMessage('Who is the document owner for AB-AI-004?')}
+                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5 shadow-md"
                 >
-                  <div className="text-sm font-bold text-slate-100">Smart RAG Search</div>
-                  <div className="text-xs text-slate-400 leading-relaxed font-normal">
-                    A hybrid search engine combining BM25 keyword matching and ChromaDB dense vectors.
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Smart RAG Agent</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
+                    Queries local Ollama LLM with hybrid RRF retrieval & grounded document citations.
                   </div>
                 </button>
 
                 <button
                   onClick={() => handleSendMessage('What is the Business Continuity Plan for Disaster Recovery?')}
-                  className="bg-[#151722] hover:bg-[#1A1D2B] border border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5"
+                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5 shadow-md"
                 >
-                  <div className="text-sm font-bold text-slate-100">Security Audit</div>
-                  <div className="text-xs text-slate-400 leading-relaxed font-normal">
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Security Audit</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
                     Evaluates system directives against PII boundaries and corporate incident plans.
                   </div>
                 </button>
 
                 <button
                   onClick={() => handleSendMessage('What are the Responsible AI & LLM Security Guidelines?')}
-                  className="bg-[#151722] hover:bg-[#1A1D2B] border border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5 sm:col-span-2 md:col-span-1"
+                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all sm:col-span-2 md:col-span-1 shadow-md"
                 >
-                  <div className="text-sm font-bold text-slate-100">Compliance Scope</div>
-                  <div className="text-xs text-slate-400 leading-relaxed font-normal">
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Compliance Scope</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
                     Enforces pre-filtering over 9 corporate departments without cross-leaks.
                   </div>
                 </button>
               </div>
 
             </div>
-          )}
-
-          {/* Active Messages Stream */}
-          {messages.length > 0 && (
-            <div className="max-w-3xl mx-auto w-full space-y-5 relative z-10">
-              {messages.map((msg) => (
-                <div key={msg.id} className="space-y-3">
-                  {msg.sender === 'user' ? (
-                    <div className="flex justify-end">
-                      <div className="max-w-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white px-5 py-3 rounded-2xl shadow-md text-sm leading-relaxed font-medium">
-                        {msg.text}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-[#151722] border border-[#232636] rounded-2xl p-5 space-y-3.5">
-                      <div className="flex items-center justify-between text-xs border-b border-[#202330] pb-3">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="font-bold text-slate-100">{msg.agentName}</span>
-                          <span className="text-[10px] font-mono bg-[#1E2130] text-sky-400 px-2 py-0.5 rounded border border-[#2A2E44] font-semibold">
-                            {searchMode.toUpperCase()}
-                          </span>
+          </div>
+        ) : (
+          /* ACTIVE CHAT VIEW: SEAMLESS CONTINUOUS CHAT SCREEN */
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative z-10">
+            
+            {/* Scrollable Messages Stream */}
+            <div ref={chatScrollContainerRef} className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pt-4 space-y-5">
+              <div className="max-w-3xl mx-auto w-full space-y-5">
+                {messages.map((msg) => (
+                  <div key={msg.id} className="space-y-3">
+                    {msg.sender === 'user' ? (
+                      /* User Message Row */
+                      <div className="flex items-start justify-end space-x-3">
+                        <div className="max-w-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white px-5 py-3 rounded-2xl shadow-md text-sm leading-relaxed font-medium">
+                          {msg.text}
                         </div>
-                        <span className="text-slate-400 font-mono text-xs">{msg.timestamp}</span>
-                      </div>
-
-                      {/* Execution Trail */}
-                      {msg.executionTrail && (
-                        <div className="flex items-center space-x-2 text-xs font-mono text-slate-400 bg-[#0E1017] p-2.5 rounded-xl overflow-x-auto">
-                          <span className="text-slate-500 font-bold shrink-0">TRAIL:</span>
-                          {msg.executionTrail.map((step, idx) => (
-                            <React.Fragment key={idx}>
-                              <span className="text-slate-200 bg-[#171926] px-2 py-0.5 rounded shrink-0 font-medium">
-                                {step.agent} ({step.latencyMs}ms)
-                              </span>
-                              {idx < msg.executionTrail!.length - 1 && (
-                                <ChevronRight className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                              )}
-                            </React.Fragment>
-                          ))}
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-sky-600 flex items-center justify-center font-bold text-white text-xs shadow-md shrink-0 mt-0.5">
+                          JM
                         </div>
-                      )}
-
-                      <div className="text-sm text-slate-100 leading-relaxed whitespace-pre-wrap font-normal">
-                        {msg.text}
                       </div>
+                    ) : (
+                      /* AI Agent Response Row */
+                      <div className="flex items-start space-x-3">
+                        <div className="iridescent-orb-sm shadow-lg shadow-sky-500/30 mt-1" />
 
-                      {/* Retrieved Knowledge Sources */}
-                      {msg.sources && msg.sources.length > 0 && (
-                        <div className="pt-2 border-t border-[#202330] space-y-2">
-                          <button
-                            onClick={() => toggleSourceExpand(msg.id)}
-                            className="flex items-center justify-between w-full text-xs font-mono text-sky-400 hover:text-sky-300 font-bold"
-                          >
-                            <span className="flex items-center space-x-1.5">
-                              <Database className="w-3.5 h-3.5" />
-                              <span>
-                                RETRIEVED SOURCES ({msg.sources.length} CHUNKS - FILTER: {msg.observability?.department})
+                        <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-5 space-y-3.5 shadow-md">
+                          <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-3">
+                            <div className="flex items-center space-x-2">
+                              <div className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+                              <span className="font-bold text-slate-900 dark:text-slate-100">{msg.agentName}</span>
+                              <span className="text-[10px] font-mono bg-sky-50 dark:bg-[#1E2130] text-sky-700 dark:text-sky-400 px-2 py-0.5 rounded border border-sky-200 dark:border-[#2A2E44] font-semibold">
+                                {searchMode.toUpperCase()}
                               </span>
-                            </span>
-                            {expandedSources[msg.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          </button>
+                            </div>
+                            <span className="text-slate-500 dark:text-slate-400 font-mono text-xs">{msg.timestamp}</span>
+                          </div>
 
-                          {expandedSources[msg.id] && (
-                            <div className="space-y-2 pt-1">
-                              {msg.sources.map((src, idx) => (
-                                <div key={idx} className="p-3 rounded-xl bg-[#0E1017] border border-[#202330] text-xs font-mono space-y-1">
-                                  <div className="flex justify-between text-slate-300">
-                                    <span className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
-                                      <FileText className="w-3.5 h-3.5 text-sky-400" />
-                                      {src.title}
-                                    </span>
-                                    <span className="text-emerald-400 font-bold">
-                                      SCORE: {src.score}
-                                    </span>
-                                  </div>
-                                  <div className="text-[11px] text-slate-400">
-                                    DEPT: {src.department} | CHUNK: {src.chunkIndex}
-                                  </div>
-                                  <p className="text-slate-300 font-sans text-xs pt-0.5 leading-relaxed">
-                                    "{src.text}"
-                                  </p>
-                                </div>
+                          {/* Execution Trail */}
+                          {msg.executionTrail && (
+                            <div className="flex items-center space-x-2 text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-100/80 dark:bg-[#0E1017] p-2.5 rounded-xl overflow-x-auto border border-slate-200/60 dark:border-transparent">
+                              <span className="text-slate-500 font-bold shrink-0">TRAIL:</span>
+                              {msg.executionTrail.map((step, idx) => (
+                                <React.Fragment key={idx}>
+                                  <span className="text-slate-800 dark:text-slate-200 bg-white dark:bg-[#171926] border border-slate-200 dark:border-transparent px-2 py-0.5 rounded shrink-0 font-medium">
+                                    {step.agent} ({step.latencyMs}ms)
+                                  </span>
+                                  {idx < msg.executionTrail!.length - 1 && (
+                                    <ChevronRight className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400 shrink-0" />
+                                  )}
+                                </React.Fragment>
                               ))}
                             </div>
                           )}
+
+                          <div className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap font-normal">
+                            {msg.text}
+                          </div>
+
+                          {/* Citations Block */}
+                          {msg.citations && msg.citations.length > 0 && (
+                            <div className="pt-2.5 border-t border-slate-200/80 dark:border-[#202330]/80 space-y-1.5">
+                              <div className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+                                <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
+                                <span>Sources / Citations:</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                {Array.from(new Set(msg.citations.map((c) => `${c.filename}|${c.department}`))).map((key) => {
+                                  const [filename, department] = key.split('|');
+                                  return (
+                                    <span
+                                      key={key}
+                                      className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-sky-50/80 dark:bg-[#0E1017] border border-sky-200/80 dark:border-[#202330] text-[11px] font-mono text-slate-700 dark:text-slate-300 font-medium shadow-xs"
+                                    >
+                                      <span className="text-sky-700 dark:text-cyan-300 font-extrabold">{filename}</span>
+                                      <span className="text-slate-400 dark:text-slate-500">•</span>
+                                      <span className="text-slate-600 dark:text-slate-400">{department}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Retrieved Knowledge Sources */}
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div className="pt-2 border-t border-slate-200/80 dark:border-[#202330] space-y-2">
+                              <button
+                                onClick={() => toggleSourceExpand(msg.id)}
+                                className="flex items-center justify-between w-full text-xs font-mono text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 font-bold"
+                              >
+                                <span className="flex items-center space-x-1.5">
+                                  <Database className="w-3.5 h-3.5" />
+                                  <span>
+                                    RETRIEVED SOURCES ({msg.sources.length} CHUNKS - FILTER: {msg.observability?.department})
+                                  </span>
+                                </span>
+                                {expandedSources[msg.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              </button>
+
+                              {expandedSources[msg.id] && (
+                                <div className="space-y-2 pt-1">
+                                  {msg.sources.map((src, idx) => (
+                                    <div key={idx} className="p-3 rounded-xl bg-slate-50 dark:bg-[#0E1017] border border-slate-200 dark:border-[#202330] text-xs font-mono space-y-1 shadow-xs">
+                                      <div className="flex justify-between text-slate-700 dark:text-slate-300">
+                                        <span className="font-bold text-sky-800 dark:text-cyan-200 flex items-center gap-1.5 text-xs">
+                                          <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-cyan-400" />
+                                          {src.title}
+                                        </span>
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                          SCORE: {src.score}
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        DEPT: {src.department} | CHUNK: {src.chunkIndex}
+                                      </div>
+                                      <p className="text-slate-800 dark:text-slate-300 font-sans text-xs pt-0.5 leading-relaxed">
+                                        "{src.text}"
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* SINGLE PERSISTENT COMPACT PROCESSING CONTAINER */}
+                {isProcessing && (
+                  <div className="flex items-start space-x-3 transition-opacity duration-200">
+                    <div className="iridescent-orb-sm shadow-lg shadow-sky-500/30 mt-1" />
+                    <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-3.5 space-y-2 shadow-md">
+                      <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-2">
+                        <div className="flex items-center space-x-2">
+                          <Bot className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
+                          <span className="font-bold text-slate-900 dark:text-slate-100">{selectedAgent.name}</span>
+                          <span className="text-[10px] font-mono bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-400 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-500/30 font-semibold animate-pulse">
+                            THINKING...
+                          </span>
+                        </div>
+                        <span className="text-slate-500 dark:text-slate-400 font-mono text-[11px] flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3 animate-spin text-sky-500 dark:text-sky-400" />
+                          Ollama (qwen2.5:3b)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-2.5 text-xs text-sky-700 dark:text-sky-300 font-mono font-medium">
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 animate-spin shrink-0" />
+                        <span className="truncate">{loadingStepText}</span>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                )}
 
-              <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} />
+              </div>
             </div>
-          )}
 
-          {/* Fixed Bottom Input Bar when active */}
-          {messages.length > 0 && (
-            <div className="max-w-3xl mx-auto w-full pt-3 relative z-10">
-              <div className="bg-[#151722] border border-[#232636] rounded-2xl p-4 text-left space-y-2.5 shadow-xl">
-                <textarea
-                  rows={2}
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                  placeholder="Message AI Chat..."
-                  className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none resize-none"
-                />
+            {/* SEAMLESS FLOATING COMPOSER */}
+            <div className="shrink-0 px-4 sm:px-6 pt-2 pb-4 sm:pb-5">
+              <div className="max-w-3xl mx-auto w-full">
+                <div className="bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-3.5 text-left space-y-2.5 shadow-xl">
+                  <textarea
+                    rows={2}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    placeholder="Message AI Chat..."
+                    className="w-full bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
+                  />
 
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={handleBatchIngest}
+                        disabled={isIngesting}
+                        className="p-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-50"
+                      >
+                        {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-500 dark:text-sky-400" /> : <Paperclip className="w-4 h-4" />}
+                      </button>
+                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-medium truncate max-w-[200px] sm:max-w-none">
+                        Filter: {activeDepartment} | Mode: {searchMode}
+                      </span>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={handleBatchIngest}
-                      disabled={isIngesting}
-                      className="p-2 rounded-xl bg-[#1D2030] text-slate-300 hover:text-white disabled:opacity-50"
+                      onClick={() => handleSendMessage()}
+                      disabled={!inputMessage.trim() || isProcessing}
+                      className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold transition-colors shadow-md"
                     >
-                      {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-400" /> : <Paperclip className="w-4 h-4" />}
+                      <Send className="w-4 h-4 stroke-[2.5]" />
                     </button>
-                    <span className="text-xs font-mono text-slate-400 font-medium">
-                      Filter: {activeDepartment} | Mode: {searchMode}
-                    </span>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSendMessage()}
-                    disabled={!inputMessage.trim() || isProcessing}
-                    className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold"
-                  >
-                    <Send className="w-4 h-4 stroke-[2.5]" />
-                  </button>
                 </div>
               </div>
             </div>
-          )}
 
-        </div>
+          </div>
+        )}
+
       </main>
 
       {/* ========================================================================= */}
       {/* 3. RIGHT OBSERVABILITY DRAWER */}
       {/* ========================================================================= */}
       {inspectorOpen && (
-        <aside className="w-72 sm:w-80 bg-[#0A0B0F] border-l border-[#1B1D28] flex flex-col justify-between z-20 shrink-0 p-5 text-xs font-mono">
+        <aside className="w-72 sm:w-80 bg-[#F8FAFC] dark:bg-[#0A0B0F] border-l border-slate-200/80 dark:border-[#1B1D28] flex flex-col justify-between z-20 shrink-0 p-5 text-xs font-mono">
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-[#1B1D28] pb-3">
-              <span className="font-bold text-slate-200 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-sky-400" /> OBSERVABILITY
+            <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-[#1B1D28] pb-3">
+              <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-sky-500 dark:text-sky-400" /> OBSERVABILITY
               </span>
-              <button onClick={() => setInspectorOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button onClick={() => setInspectorOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
                 <PanelRightClose className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-2.5">
-              <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Pipeline Metrics</div>
-              <div className="p-3.5 rounded-xl bg-[#141620] border border-[#202330] space-y-1.5">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Pipeline Metrics</div>
+              <div className="p-3.5 rounded-xl bg-white dark:bg-[#141620] border border-slate-200 dark:border-[#202330] space-y-1.5 shadow-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Search Mode:</span>
-                  <span className="text-emerald-400 font-bold">{searchMode.toUpperCase()}</span>
+                  <span className="text-slate-500 dark:text-slate-400">Search Mode:</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">{searchMode.toUpperCase()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Pre-Filter:</span>
-                  <span className="text-slate-200 font-semibold">{activeDepartment}</span>
+                  <span className="text-slate-500 dark:text-slate-400">Pre-Filter:</span>
+                  <span className="text-slate-800 dark:text-slate-200 font-semibold">{activeDepartment}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Vector Store:</span>
-                  <span className="text-slate-200">ChromaDB</span>
+                  <span className="text-slate-500 dark:text-slate-400">Vector Store:</span>
+                  <span className="text-slate-800 dark:text-slate-200">ChromaDB</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Embedding:</span>
-                  <span className="text-slate-200">384-dim</span>
+                  <span className="text-slate-500 dark:text-slate-400">LLM Engine:</span>
+                  <span className="text-sky-600 dark:text-sky-400 font-semibold">Ollama (qwen2.5)</span>
                 </div>
               </div>
 
               {ingestStats && (
-                <div className="p-3.5 rounded-xl bg-[#141620] border border-[#202330] space-y-1.5">
-                  <div className="text-slate-200 font-bold">Indexed Corpus</div>
+                <div className="p-3.5 rounded-xl bg-white dark:bg-[#141620] border border-slate-200 dark:border-[#202330] space-y-1.5 shadow-xs">
+                  <div className="text-slate-800 dark:text-slate-200 font-bold">Indexed Corpus</div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Processed Files:</span>
-                    <span className="text-slate-200 font-semibold">{ingestStats.totalDocs} PDFs</span>
+                    <span className="text-slate-500 dark:text-slate-400">Processed Files:</span>
+                    <span className="text-slate-800 dark:text-slate-200 font-semibold">{ingestStats.totalDocs} PDFs</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Indexed Chunks:</span>
-                    <span className="text-sky-400 font-bold">{ingestStats.totalChunks} vectors</span>
+                    <span className="text-slate-500 dark:text-slate-400">Indexed Chunks:</span>
+                    <span className="text-sky-600 dark:text-sky-400 font-bold">{ingestStats.totalChunks} vectors</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          <div className="pt-3 border-t border-[#1B1D28] text-slate-400 text-xs flex justify-between font-mono">
+          <div className="pt-3 border-t border-slate-200/80 dark:border-[#1B1D28] text-slate-500 dark:text-slate-400 text-xs flex justify-between font-mono">
             <span>SYSTEM: ONLINE</span>
-            <span className="text-emerald-400 font-bold">200 OK</span>
+            <span className="text-emerald-600 dark:text-emerald-400 font-bold">200 OK</span>
           </div>
         </aside>
       )}

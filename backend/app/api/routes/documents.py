@@ -330,6 +330,7 @@ async def search_documents(request: DocumentSearchRequest) -> DocumentSearchResp
                 vector_score=res["vector_score"],
                 bm25_score=res["bm25_score"],
                 fused_rrf_score=res["fused_rrf_score"],
+                exact_id_match=res.get("exact_id_match", False),
             )
             for res in raw_results
         ]

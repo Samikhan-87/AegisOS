@@ -75,6 +75,7 @@ class SearchResultItem(BaseModel):
     vector_score: Optional[float] = Field(default=None, description="Vector similarity score")
     bm25_score: Optional[float] = Field(default=None, description="Raw BM25 score")
     fused_rrf_score: Optional[float] = Field(default=None, description="Reciprocal Rank Fusion score")
+    exact_id_match: bool = Field(default=False, description="True if result was boosted by deterministic document ID match")
 
 
 class DocumentSearchResponse(BaseModel):

@@ -57,9 +57,11 @@ def generate_node(state: AgentState) -> dict[str, Any]:
     query = state["query"]
     chunks = state.get("retrieved_chunks", [])
 
+    fallback_response = "I don't have that information in the available documents."
+
     if not chunks:
         return {
-            "answer": "I do not have sufficient information in the provided context to answer your request.",
+            "answer": fallback_response,
             "citations": []
         }
 
@@ -93,20 +95,26 @@ def generate_node(state: AgentState) -> dict[str, Any]:
 
     formatted_context = "\n---\n".join(context_blocks)
 
-    # Build grounded system prompt
+    # Build strict grounded system prompt prohibiting greetings & forcing exact fallback
     prompt = (
-        "You are an enterprise AI assistant for Aegis OS.\n\n"
-        "INSTRUCTIONS:\n"
-        "1. Answer ONLY using the provided context below.\n"
-        "2. If the answer cannot be found in the provided context, state: 'I do not have sufficient information in the provided context to answer this query.'\n"
-        "3. Do NOT use outside knowledge, speculate, or make assumptions.\n"
-        "4. Be concise, direct, and professional.\n\n"
-        f"CONTEXT:\n{formatted_context}\n\n"
+        "SYSTEM INSTRUCTIONS:\n"
+        "You are a strict document retrieval assistant for Aegis OS.\n"
+        "1. NEVER greet the user (do not say 'Hello', 'Hi', 'Good day', or 'How can I help you today?').\n"
+        "2. Answer ONLY using the facts explicitly stated in the provided context chunks below.\n"
+        "3. If the provided context chunks do not contain the answer, respond EXACTLY with:\n"
+        "   I don't have that information in the available documents.\n"
+        "4. Do NOT use outside knowledge, speculate, or make assumptions.\n\n"
+        f"CONTEXT CHUNKS:\n{formatted_context}\n\n"
         f"USER QUERY: {query}\n\n"
         "ANSWER:"
     )
 
-    answer = call_ollama(prompt=prompt)
+    answer = call_ollama(prompt=prompt).strip()
+
+    # Safety check: if model outputs a conversational greeting or ungrounded response, enforce fallback
+    lower_ans = answer.lower()
+    if any(g in lower_ans for g in ["how can i help", "how can i assist", "hello!", "hi there"]):
+        answer = fallback_response
 
     return {
         "answer": answer,
