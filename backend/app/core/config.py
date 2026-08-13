@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     DATABASE_URL: str = "postgresql://aegis:aegis_pass@db:5432/aegis_db"
     OLLAMA_BASE_URL: str = "http://host.docker.internal:11434"
-    OLLAMA_MODEL: str = "qwen2.5:3b"
+    OLLAMA_MODEL: str = "gemma2:2b"
     GEMINI_API_KEY: str = ""
 
 

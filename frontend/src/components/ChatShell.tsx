@@ -299,9 +299,10 @@ export function ChatShell() {
   useEffect(() => {
     if (chatScrollContainerRef.current) {
       const container = chatScrollContainerRef.current;
-      if (container.scrollHeight > container.clientHeight) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [messages, isProcessing]);
 
@@ -834,7 +835,7 @@ export function ChatShell() {
                         </div>
                         <span className="text-slate-500 dark:text-slate-400 font-mono text-[11px] flex items-center gap-1">
                           <RefreshCw className="w-3 h-3 animate-spin text-sky-500 dark:text-sky-400" />
-                          Ollama (qwen2.5:3b)
+                          Ollama (gemma2:2b)
                         </span>
                       </div>
 
@@ -933,7 +934,7 @@ export function ChatShell() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500 dark:text-slate-400">LLM Engine:</span>
-                  <span className="text-sky-600 dark:text-sky-400 font-semibold">Ollama (qwen2.5)</span>
+                  <span className="text-sky-600 dark:text-sky-400 font-semibold">Ollama (gemma2:2b)</span>
                 </div>
               </div>
 

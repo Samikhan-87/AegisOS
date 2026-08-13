@@ -10,14 +10,14 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 100.0) -> str:
+def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 120.0) -> str:
     """
     Sends a generation prompt to a local Ollama instance via REST API.
 
     Args:
         prompt (str): Grounded prompt text.
-        model (str | None): Optional model override. Defaults to OLLAMA_MODEL env var or 'qwen2.5:3b'.
-        timeout_seconds (float): Connection and generation timeout in seconds (default: 100.0s).
+        model (str | None): Optional model override. Defaults to OLLAMA_MODEL env var or 'gemma2:2b'.
+        timeout_seconds (float): Connection and generation timeout in seconds (default: 120.0s).
 
     Returns:
         str: Generated response text or clear error message if Ollama is unreachable.
@@ -25,12 +25,21 @@ def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 
 
     base_url = os.getenv("OLLAMA_BASE_URL", settings.OLLAMA_BASE_URL).rstrip("/")
     target_model = model or os.getenv("OLLAMA_MODEL", settings.OLLAMA_MODEL)
+    max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "256"))
+    context_size = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
 
     endpoint = f"{base_url}/api/generate"
     payload = {
         "model": target_model,
         "prompt": prompt,
         "stream": False,
+        "options": {
+            "num_predict": max_tokens,     # Caps generation length for fast CPU response
+            "num_ctx": context_size,        # Restricts context window size for fast prompt processing
+            "temperature": 0.1,             # Low temperature for deterministic grounded answers
+            "top_k": 20,
+            "top_p": 0.9,
+        }
     }
 
     try:
@@ -51,7 +60,7 @@ def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 
     except httpx.TimeoutException:
         error_msg = (
             f"Error: Ollama generation timed out after {timeout_seconds} seconds using model '{target_model}'. "
-            "Local CPU inference can be slow — consider using a smaller model (e.g., 'qwen2.5:3b' or 'llama3.2:1b')."
+            "Local CPU inference can be slow — consider using a smaller model (e.g., 'gemma2:2b' or 'llama3.2:1b')."
         )
         logger.error(error_msg)
         return error_msg

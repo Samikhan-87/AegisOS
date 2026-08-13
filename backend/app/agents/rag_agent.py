@@ -51,8 +51,9 @@ def retrieve_node(state: AgentState) -> dict[str, Any]:
 
 def generate_node(state: AgentState) -> dict[str, Any]:
     """
-    LangGraph Node 2: Formats retrieved context, calls local Ollama LLM with grounding instructions,
-    and extracts source document citations.
+    LangGraph Node 2: Formats retrieved context using the top 3 highest-scoring chunks,
+    calls local Ollama LLM with grounding instructions, and extracts source document citations
+    from all top 5 retrieved chunks for UI transparency.
     """
     query = state["query"]
     chunks = state.get("retrieved_chunks", [])
@@ -65,12 +66,12 @@ def generate_node(state: AgentState) -> dict[str, Any]:
             "citations": []
         }
 
-    # Format context blocks and gather citations
-    context_blocks: list[str] = []
-    citations: list[dict[str, Any]] = []
-    seen_citations: set[str] = set()
+    # Pass only top 3 highest-scoring chunks to LLM prompt to reduce prompt length and CPU generation latency
+    prompt_chunks = chunks[:3]
 
-    for idx, chunk in enumerate(chunks, start=1):
+    # Format context blocks for LLM prompt using top 3 chunks
+    context_blocks: list[str] = []
+    for idx, chunk in enumerate(prompt_chunks, start=1):
         meta = chunk.get("metadata") or {}
         filename = meta.get("source_filename") or meta.get("filename") or "Document.pdf"
         department = meta.get("department") or "General"
@@ -83,6 +84,15 @@ def generate_node(state: AgentState) -> dict[str, Any]:
             f"Chunk Index: {chunk_idx}\n"
             f"Content: {chunk.get('text', '').strip()}\n"
         )
+
+    # Gather citations across all retrieved chunks (top 5) for UI transparency
+    citations: list[dict[str, Any]] = []
+    seen_citations: set[str] = set()
+    for chunk in chunks:
+        meta = chunk.get("metadata") or {}
+        filename = meta.get("source_filename") or meta.get("filename") or "Document.pdf"
+        department = meta.get("department") or "General"
+        chunk_idx = meta.get("chunk_index", 0)
 
         cite_key = f"{filename}_{department}_{chunk_idx}"
         if cite_key not in seen_citations:

@@ -15,6 +15,7 @@ services:
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DATABASE_URL=${DATABASE_URL}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:2b}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - HF_HOME=/app/.cache/huggingface
       - SENTENCE_TRANSFORMERS_HOME=/app/.cache/huggingface
