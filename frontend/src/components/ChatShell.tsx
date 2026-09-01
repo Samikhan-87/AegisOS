@@ -713,7 +713,7 @@ export function ChatShell() {
                     ) : (
                       /* AI Agent Response Row */
                       <div className="flex items-start space-x-3">
-                        <div className="iridescent-orb-sm shadow-lg shadow-sky-500/30 mt-1" />
+                        <div className="iridescent-orb-sm mt-1" />
 
                         <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-5 space-y-3.5 shadow-md">
                           <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-3">
@@ -823,7 +823,7 @@ export function ChatShell() {
                 {/* SINGLE PERSISTENT COMPACT PROCESSING CONTAINER */}
                 {isProcessing && (
                   <div className="flex items-start space-x-3 transition-opacity duration-200">
-                    <div className="iridescent-orb-sm shadow-lg shadow-sky-500/30 mt-1" />
+                    <div className="iridescent-orb-sm mt-1" />
                     <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-3.5 space-y-2 shadow-md">
                       <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-2">
                         <div className="flex items-center space-x-2">
