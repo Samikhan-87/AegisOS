@@ -27,12 +27,20 @@ export interface RetrievedChunk {
   fused_rrf_score?: number;
 }
 
+export interface SecurityCheckInfo {
+  is_safe: boolean;
+  risk_level: 'none' | 'low' | 'medium' | 'high';
+  flagged_patterns: string[];
+  reason: string;
+}
+
 export interface RAGAskResponseData {
   query: string;
   department_filter?: string | null;
   answer: string;
   citations: Citation[];
   retrieved_chunks: RetrievedChunk[];
+  security_check?: SecurityCheckInfo;
 }
 
 // Compute API base URL safely for client-side browser execution.
