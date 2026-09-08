@@ -35,7 +35,7 @@ interface ExecutionStep {
   step: string;
   agent: string;
   latencyMs: number;
-  status: 'completed' | 'active' | 'pending';
+  status: 'completed' | 'active' | 'pending' | 'failed';
 }
 
 interface KnowledgeSource {
@@ -65,6 +65,7 @@ interface Message {
     department: string;
     mode?: string;
   };
+  isSecurityBlocked?: boolean;
 }
 
 interface Agent {
@@ -243,6 +244,8 @@ export function ChatShell() {
       setMessages((prev) => [...prev, userMsg]);
     },
     onSuccess: (data, variables) => {
+      const isSecurityBlocked = data.security_check && data.security_check.is_safe === false;
+
       const sources: KnowledgeSource[] = (data.retrieved_chunks || []).map((item: any) => ({
         title: item.metadata?.source_filename || item.metadata?.filename || 'Document.pdf',
         department: item.metadata?.department || 'General',
@@ -251,23 +254,35 @@ export function ChatShell() {
         text: item.text
       }));
 
+      const trail: ExecutionStep[] = isSecurityBlocked
+        ? [
+            { step: 'Security Guardrail Check', agent: 'Guardrail Scanner', latencyMs: 2, status: 'completed' },
+            { step: 'Query Blocked (Malicious Pattern Detected)', agent: 'Security Auditor', latencyMs: 0, status: 'failed' }
+          ]
+        : [
+            { step: 'Security Guardrail (Pass)', agent: 'Security Auditor', latencyMs: 2, status: 'completed' },
+            { step: 'Hybrid Retrieval (BM25 + ChromaDB)', agent: 'RAG Retriever', latencyMs: 140, status: 'completed' },
+            { step: 'Grounded LLM Answer (Ollama)', agent: 'Ollama LLM', latencyMs: 820, status: 'completed' },
+            { step: 'Output Compliance Guardrail', agent: 'Security Auditor', latencyMs: 3, status: 'completed' }
+          ];
+
       const agentMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
         text: data.answer || "No response generated.",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        agentId: selectedAgent.id,
-        agentName: selectedAgent.name,
-        reasoningSummary: `Executed LangGraph RAG Agent (Hybrid Retrieval + Grounded Ollama LLM). Scope: [${variables.department_filter || 'ALL'}].`,
-        executionTrail: [
-          { step: 'Hybrid Retrieval (BM25 + Vector)', agent: 'RAG Retriever', latencyMs: 140, status: 'completed' },
-          { step: 'Grounded LLM Answer (Ollama)', agent: 'Ollama LLM', latencyMs: 820, status: 'completed' }
-        ],
+        agentId: isSecurityBlocked ? 'security-auditor' : selectedAgent.id,
+        agentName: isSecurityBlocked ? 'Security Auditor' : selectedAgent.name,
+        isSecurityBlocked,
+        reasoningSummary: isSecurityBlocked
+          ? `Blocked by Security Auditor: ${data.security_check?.reason || 'Adversarial pattern detected.'}`
+          : `Executed LangGraph RAG Agent (Hybrid Retrieval + Grounded Ollama LLM). Scope: [${variables.department_filter || 'ALL'}].`,
+        executionTrail: trail,
         sources,
         citations: data.citations || [],
         observability: {
-          latencyMs: 968,
-          totalTokens: Math.round(variables.query.length / 4) + 240,
+          latencyMs: isSecurityBlocked ? 5 : 968,
+          totalTokens: Math.round(variables.query.length / 4) + (isSecurityBlocked ? 12 : 240),
           embeddingDim: 384,
           preFilterApplied: !!variables.department_filter,
           department: variables.department_filter || 'ALL',
@@ -508,17 +523,38 @@ export function ChatShell() {
       {/* ========================================================================= */}
       <main className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative bg-[#F4F6FB] dark:bg-[#0C0D12] z-10">
         
-        {/* ABSTRACT 3D FLOWING WAVE BACKDROP (Images 1 & 2) */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 flex items-center justify-center">
-          <img
-            src={theme === 'dark' ? '/abstract_wave_dark.jpg' : '/abstract_wave_light.jpg'}
-            alt="Abstract Fluid Blue Wave"
-            className={`w-full h-full object-cover object-center scale-105 transition-all duration-700 select-none ${
-              theme === 'dark'
-                ? 'opacity-30 mix-blend-screen filter saturate-125'
-                : 'opacity-40 mix-blend-multiply filter contrast-105'
-            }`}
-          />
+        {/* ABSTRACT 3D FLOWING WAVE BACKDROP - SEAMLESS HORIZONTAL NEWS TICKER LOOP */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+          {/* Ambient Glowing Aura In Loop */}
+          <div className="absolute top-1/4 left-1/3 w-[700px] h-[700px] rounded-full bg-cyan-500/10 dark:bg-cyan-500/15 blur-[140px] animate-pulse pointer-events-none" />
+          <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] rounded-full bg-sky-600/10 dark:bg-sky-600/15 blur-[120px] animate-pulse pointer-events-none" />
+
+          {/* Endless Horizontal Marquee Track */}
+          <div className="horizontal-wave-marquee flex w-[200%] h-full shrink-0">
+            <div className="w-1/2 h-full shrink-0">
+              <img
+                src={theme === 'dark' ? '/abstract_wave_dark.jpg' : '/abstract_wave_light.jpg'}
+                alt="Abstract Fluid Blue Wave 1"
+                className={`w-full h-full object-cover object-center select-none ${
+                  theme === 'dark'
+                    ? 'opacity-35 mix-blend-screen filter saturate-125'
+                    : 'opacity-40 mix-blend-multiply filter contrast-105'
+                }`}
+              />
+            </div>
+            <div className="w-1/2 h-full shrink-0">
+              <img
+                src={theme === 'dark' ? '/abstract_wave_dark.jpg' : '/abstract_wave_light.jpg'}
+                alt="Abstract Fluid Blue Wave 2"
+                className={`w-full h-full object-cover object-center select-none scale-x-[-1] ${
+                  theme === 'dark'
+                    ? 'opacity-35 mix-blend-screen filter saturate-125'
+                    : 'opacity-40 mix-blend-multiply filter contrast-105'
+                }`}
+              />
+            </div>
+          </div>
+
           {/* Subtle vignette overlay to ensure pristine foreground contrast */}
           <div className="absolute inset-0 bg-gradient-to-b from-[#F4F6FB]/85 via-transparent to-[#F4F6FB]/90 dark:from-[#0C0D12]/85 dark:via-transparent dark:to-[#0C0D12]/95" />
         </div>
@@ -761,105 +797,118 @@ export function ChatShell() {
                       <div className="flex items-start space-x-3">
                         <div className="iridescent-orb-sm mt-1" />
 
-                        <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-5 space-y-3.5 shadow-md">
-                          <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-3">
-                            <div className="flex items-center space-x-2">
-                              <div className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
-                              <span className="font-bold text-slate-900 dark:text-slate-100">{msg.agentName}</span>
-                              <span className="text-[10px] font-mono bg-sky-50 dark:bg-[#1E2130] text-sky-700 dark:text-sky-400 px-2 py-0.5 rounded border border-sky-200 dark:border-[#2A2E44] font-semibold">
-                                {searchMode.toUpperCase()}
-                              </span>
-                            </div>
-                            <span className="text-slate-500 dark:text-slate-400 font-mono text-xs">{msg.timestamp}</span>
-                          </div>
-
-                          {/* Execution Trail */}
-                          {msg.executionTrail && (
-                            <div className="flex items-center space-x-2 text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-100/80 dark:bg-[#0E1017] p-2.5 rounded-xl overflow-x-auto border border-slate-200/60 dark:border-transparent">
-                              <span className="text-slate-500 font-bold shrink-0">TRAIL:</span>
-                              {msg.executionTrail.map((step, idx) => (
-                                <React.Fragment key={idx}>
-                                  <span className="text-slate-800 dark:text-slate-200 bg-white dark:bg-[#171926] border border-slate-200 dark:border-transparent px-2 py-0.5 rounded shrink-0 font-medium">
-                                    {step.agent} ({step.latencyMs}ms)
-                                  </span>
-                                  {idx < msg.executionTrail!.length - 1 && (
-                                    <ChevronRight className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400 shrink-0" />
-                                  )}
-                                </React.Fragment>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap font-normal">
-                            {msg.text}
-                          </div>
-
-                          {/* Citations Block */}
-                          {msg.citations && msg.citations.length > 0 && (
-                            <div className="pt-2.5 border-t border-slate-200/80 dark:border-[#202330]/80 space-y-1.5">
-                              <div className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
-                                <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                                <span>Sources / Citations:</span>
-                              </div>
-                              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                {Array.from(new Set(msg.citations.map((c) => `${c.filename}|${c.department}`))).map((key) => {
-                                  const [filename, department] = key.split('|');
-                                  return (
-                                    <span
-                                      key={key}
-                                      className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-sky-50/80 dark:bg-[#0E1017] border border-sky-200/80 dark:border-[#202330] text-[11px] font-mono text-slate-700 dark:text-slate-300 font-medium shadow-xs"
-                                    >
-                                      <span className="text-sky-700 dark:text-cyan-300 font-extrabold">{filename}</span>
-                                      <span className="text-slate-400 dark:text-slate-500">•</span>
-                                      <span className="text-slate-600 dark:text-slate-400">{department}</span>
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Retrieved Knowledge Sources */}
-                          {msg.sources && msg.sources.length > 0 && (
-                            <div className="pt-2 border-t border-slate-200/80 dark:border-[#202330] space-y-2">
-                              <button
-                                onClick={() => toggleSourceExpand(msg.id)}
-                                className="flex items-center justify-between w-full text-xs font-mono text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 font-bold"
-                              >
-                                <span className="flex items-center space-x-1.5">
-                                  <Database className="w-3.5 h-3.5" />
-                                  <span>
-                                    RETRIEVED SOURCES ({msg.sources.length} CHUNKS - FILTER: {msg.observability?.department})
-                                  </span>
+                        {/* AI Agent Response Card Container */}
+                        <div
+                          className={`flex-1 rounded-2xl shadow-md ${
+                            msg.isSecurityBlocked
+                              ? 'security-border-loop'
+                              : 'border border-slate-200 dark:border-[#232636]'
+                          }`}
+                        >
+                          <div className="relative z-10 w-full h-full bg-white dark:bg-[#151722] rounded-[15px] p-5 space-y-3.5">
+                            <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-3">
+                              <div className="flex items-center space-x-2">
+                                <div className={`w-2 h-2 rounded-full ${msg.isSecurityBlocked ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500 dark:bg-emerald-400 animate-pulse'}`} />
+                                <span className="font-bold text-slate-900 dark:text-slate-100">{msg.agentName}</span>
+                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${
+                                  msg.isSecurityBlocked
+                                    ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50'
+                                    : 'bg-sky-50 dark:bg-[#1E2130] text-sky-700 dark:text-sky-400 border-sky-200 dark:border-[#2A2E44]'
+                                }`}>
+                                  {msg.isSecurityBlocked ? 'GUARDRAIL BLOCKED' : searchMode.toUpperCase()}
                                 </span>
-                                {expandedSources[msg.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                              </button>
-
-                              {expandedSources[msg.id] && (
-                                <div className="space-y-2 pt-1">
-                                  {msg.sources.map((src, idx) => (
-                                    <div key={idx} className="p-3 rounded-xl bg-slate-50 dark:bg-[#0E1017] border border-slate-200 dark:border-[#202330] text-xs font-mono space-y-1 shadow-xs">
-                                      <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                                        <span className="font-bold text-sky-800 dark:text-cyan-200 flex items-center gap-1.5 text-xs">
-                                          <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-cyan-400" />
-                                          {src.title}
-                                        </span>
-                                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                          SCORE: {src.score}
-                                        </span>
-                                      </div>
-                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                        DEPT: {src.department} | CHUNK: {src.chunkIndex}
-                                      </div>
-                                      <p className="text-slate-800 dark:text-slate-300 font-sans text-xs pt-0.5 leading-relaxed">
-                                        "{src.text}"
-                                      </p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              </div>
+                              <span className="text-slate-500 dark:text-slate-400 font-mono text-xs">{msg.timestamp}</span>
                             </div>
-                          )}
+
+                            {/* Execution Trail */}
+                            {msg.executionTrail && (
+                              <div className="flex items-center space-x-2 text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-100/80 dark:bg-[#0E1017] p-2.5 rounded-xl overflow-x-auto border border-slate-200/60 dark:border-transparent">
+                                <span className="text-slate-500 font-bold shrink-0">TRAIL:</span>
+                                {msg.executionTrail.map((step, idx) => (
+                                  <React.Fragment key={idx}>
+                                    <span className="text-slate-800 dark:text-slate-200 bg-white dark:bg-[#171926] border border-slate-200 dark:border-transparent px-2 py-0.5 rounded shrink-0 font-medium">
+                                      {step.agent} ({step.latencyMs}ms)
+                                    </span>
+                                    {idx < msg.executionTrail!.length - 1 && (
+                                      <ChevronRight className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400 shrink-0" />
+                                    )}
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap font-normal">
+                              {msg.text}
+                            </div>
+
+                            {/* Citations Block */}
+                            {msg.citations && msg.citations.length > 0 && (
+                              <div className="pt-2.5 border-t border-slate-200/80 dark:border-[#202330]/80 space-y-1.5">
+                                <div className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+                                  <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
+                                  <span>Sources / Citations:</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                  {Array.from(new Set(msg.citations.map((c) => `${c.filename}|${c.department}`))).map((key) => {
+                                    const [filename, department] = key.split('|');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-sky-50/80 dark:bg-[#0E1017] border border-sky-200/80 dark:border-[#202330] text-[11px] font-mono text-slate-700 dark:text-slate-300 font-medium shadow-xs"
+                                      >
+                                        <span className="text-sky-700 dark:text-cyan-300 font-extrabold">{filename}</span>
+                                        <span className="text-slate-400 dark:text-slate-500">•</span>
+                                        <span className="text-slate-600 dark:text-slate-400">{department}</span>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Retrieved Knowledge Sources */}
+                            {msg.sources && msg.sources.length > 0 && (
+                              <div className="pt-2 border-t border-slate-200/80 dark:border-[#202330] space-y-2">
+                                <button
+                                  onClick={() => toggleSourceExpand(msg.id)}
+                                  className="flex items-center justify-between w-full text-xs font-mono text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 font-bold"
+                                >
+                                  <span className="flex items-center space-x-1.5">
+                                    <Database className="w-3.5 h-3.5" />
+                                    <span>
+                                      RETRIEVED SOURCES ({msg.sources.length} CHUNKS - FILTER: {msg.observability?.department})
+                                    </span>
+                                  </span>
+                                  {expandedSources[msg.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                </button>
+
+                                {expandedSources[msg.id] && (
+                                  <div className="space-y-2 pt-1">
+                                    {msg.sources.map((src, idx) => (
+                                      <div key={idx} className="p-3 rounded-xl bg-slate-50 dark:bg-[#0E1017] border border-slate-200 dark:border-[#202330] text-xs font-mono space-y-1 shadow-xs">
+                                        <div className="flex justify-between text-slate-700 dark:text-slate-300">
+                                          <span className="font-bold text-sky-800 dark:text-cyan-200 flex items-center gap-1.5 text-xs">
+                                            <FileText className="w-3.5 h-3.5 text-sky-500 dark:text-cyan-400" />
+                                            {src.title}
+                                          </span>
+                                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                            SCORE: {src.score}
+                                          </span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                          DEPT: {src.department} | CHUNK: {src.chunkIndex}
+                                        </div>
+                                        <p className="text-slate-800 dark:text-slate-300 font-sans text-xs pt-0.5 leading-relaxed">
+                                          "{src.text}"
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}

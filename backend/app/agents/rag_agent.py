@@ -20,7 +20,7 @@ LangGraph RAG Agent with Pre-Retrieval Security Guardrail, Grounded Generation a
 from typing import Any, Optional, TypedDict
 from langgraph.graph import END, START, StateGraph
 from app.agents.llm_client import call_ollama
-from app.agents.security_auditor import check_input
+from app.agents.security_auditor import check_input, check_output
 from app.rag.hybrid_search import hybrid_search
 
 
@@ -34,6 +34,7 @@ class AgentState(TypedDict):
     retrieved_chunks: list[dict[str, Any]]
     answer: str
     citations: list[dict[str, Any]]
+    output_flag: dict[str, Any]
 
 
 def security_check_node(state: AgentState) -> dict[str, Any]:
@@ -46,12 +47,21 @@ def security_check_node(state: AgentState) -> dict[str, Any]:
     security_result = check_input(query)
 
     if not security_result["is_safe"]:
-        rejection_reason = security_result.get("reason", "Prompt injection or adversarial query detected.")
+        flagged_cats = security_result.get("flagged_categories", [])
+        if "credential_harvesting" in flagged_cats or any("credential_harvesting" in p for p in security_result.get("flagged_patterns", [])):
+            rejection_text = (
+                "I am unable to provide or disclose passwords, credentials, or authentication secrets for any employee or user. "
+                "In accordance with Aegis OS enterprise security policies, credential access and unauthorized extraction requests are strictly prohibited."
+            )
+        else:
+            rejection_reason = security_result.get("reason", "Prompt injection or adversarial query detected.")
+            rejection_text = f"This query was flagged by security validation and cannot be processed. ({rejection_reason})"
+
         return {
             "security_flag": security_result,
             "retrieved_chunks": [],
             "citations": [],
-            "answer": f"This query was flagged by security validation and cannot be processed. ({rejection_reason})"
+            "answer": rejection_text,
         }
 
     return {
@@ -170,14 +180,48 @@ def generate_node(state: AgentState) -> dict[str, Any]:
     }
 
 
+def output_validation_node(state: AgentState) -> dict[str, Any]:
+    """
+    LangGraph Node 3 (Post-Generation Guardrail):
+    Validates generated answer against restricted content exposure,
+    hallucinated entities/numbers, and ungrounded PII patterns.
+
+    --- ARCHITECTURAL RATIONALE: WHY OUTPUT VALIDATION DOES NOT HARD-BLOCK ---
+    Unlike input validation — which hard-blocks malicious queries before retrieval to prevent
+    prompt injection, system prompt leakage, and database exploitation — output validation
+    acts as an informational compliance guardrail. A flagged output (e.g., potential verbatim
+    quote or ungrounded entity) may still contain highly valuable, accurate answers for the user.
+    Hard-blocking output would frustrate legitimate workflows and cause high false-positive rejection.
+    By prepending a visible caution notice instead of dropping the answer, we preserve system utility
+    while ensuring complete transparency and alerting compliance officers/auditors to review the output.
+    """
+    answer = state.get("answer", "")
+    chunks = state.get("retrieved_chunks", [])
+
+    output_check_res = check_output(answer=answer, retrieved_chunks=chunks)
+
+    # If medium or high risk is detected, prepend a visible caution notice
+    if output_check_res["risk_level"] in ["medium", "high"]:
+        caution_notice = f"⚠️ [Security Review Notice: {output_check_res['reason']}]\n\n"
+        return {
+            "answer": caution_notice + answer,
+            "output_flag": output_check_res,
+        }
+
+    return {
+        "output_flag": output_check_res,
+    }
+
+
 # ==============================================================================
 # LangGraph StateGraph Construction
-# Flow: START -> security_check -> (safe? -> retrieve -> generate -> END | unsafe? -> END)
+# Flow: START -> security_check -> (safe? -> retrieve -> generate -> output_validation -> END | unsafe? -> END)
 # ==============================================================================
 workflow = StateGraph(AgentState)
 workflow.add_node("security_check", security_check_node)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("generate", generate_node)
+workflow.add_node("output_validation", output_validation_node)
 
 workflow.add_edge(START, "security_check")
 workflow.add_conditional_edges(
@@ -185,11 +229,12 @@ workflow.add_conditional_edges(
     should_proceed_to_retrieval,
     {
         "retrieve": "retrieve",
-        END: END
-    }
+        END: END,
+    },
 )
 workflow.add_edge("retrieve", "generate")
-workflow.add_edge("generate", END)
+workflow.add_edge("generate", "output_validation")
+workflow.add_edge("output_validation", END)
 
 rag_graph = workflow.compile()
 
@@ -199,7 +244,7 @@ def run_rag_agent(query: str, department_filter: str | None = None) -> dict[str,
     Invokes compiled LangGraph workflow with query and optional department pre-filter.
 
     Returns:
-        dict: Final state containing 'answer', 'citations', 'retrieved_chunks', and 'security_check'.
+        dict: Final state containing 'answer', 'citations', 'retrieved_chunks', 'security_check', and 'output_check'.
     """
     initial_state: AgentState = {
         "query": query,
@@ -207,10 +252,34 @@ def run_rag_agent(query: str, department_filter: str | None = None) -> dict[str,
         "security_flag": {},
         "retrieved_chunks": [],
         "answer": "",
-        "citations": []
+        "citations": [],
+        "output_flag": {},
     }
 
     final_state = rag_graph.invoke(initial_state)
+
+    sec_flag = final_state.get("security_flag")
+    if not isinstance(sec_flag, dict) or "is_safe" not in sec_flag:
+        sec_flag = {
+            "is_safe": True,
+            "risk_level": "none",
+            "flagged_patterns": [],
+            "reason": "Default safety pass."
+        }
+
+    output_flag = final_state.get("output_flag")
+    if not isinstance(output_flag, dict) or "is_safe" not in output_flag:
+        is_query_safe = sec_flag.get("is_safe", True)
+        output_flag = {
+            "is_safe": True,
+            "risk_level": "none",
+            "flagged_patterns": [],
+            "reason": (
+                "Output validation skipped: query blocked at input security boundary."
+                if not is_query_safe
+                else "Default safety pass."
+            )
+        }
 
     return {
         "query": final_state["query"],
@@ -218,10 +287,6 @@ def run_rag_agent(query: str, department_filter: str | None = None) -> dict[str,
         "answer": final_state.get("answer", ""),
         "citations": final_state.get("citations", []),
         "retrieved_chunks": final_state.get("retrieved_chunks", []),
-        "security_check": final_state.get("security_flag", {
-            "is_safe": True,
-            "risk_level": "none",
-            "flagged_patterns": [],
-            "reason": "Default safety pass."
-        })
+        "security_check": sec_flag,
+        "output_check": output_flag,
     }

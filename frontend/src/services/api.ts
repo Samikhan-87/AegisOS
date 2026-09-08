@@ -41,6 +41,7 @@ export interface RAGAskResponseData {
   citations: Citation[];
   retrieved_chunks: RetrievedChunk[];
   security_check?: SecurityCheckInfo;
+  output_check?: SecurityCheckInfo;
 }
 
 // Compute API base URL safely for client-side browser execution.

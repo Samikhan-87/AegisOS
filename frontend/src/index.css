@@ -34,17 +34,22 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.1);
 }
 
-@keyframes waveFloat {
-  0%, 100% {
-    transform: translateY(0) scale(1);
+/* Seamless Continuous Horizontal Marquee Loop for Abstract Wave */
+@keyframes horizontalWaveTicker {
+  0% {
+    transform: translate3d(0, 0, 0);
   }
-  50% {
-    transform: translateY(-8px) scale(1.015);
+  100% {
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
-.animate-wave-float {
-  animation: waveFloat 10s ease-in-out infinite;
+.horizontal-wave-marquee {
+  display: flex;
+  width: 200%;
+  height: 100%;
+  animation: horizontalWaveTicker 26s linear infinite;
+  will-change: transform;
 }
 
 /* 3D Iridescent Planetary Rotating Sphere (Clean Crisp Ball - No Outer Drop Shadow) */
@@ -140,3 +145,49 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.4);
 }
+
+/* Animated Red Looping Motion Border for Security Guardrail Alerts */
+@keyframes securityBorderRotate {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.security-border-loop {
+  position: relative;
+  border-radius: 1rem;
+  padding: 1.5px;
+  overflow: hidden;
+  box-shadow: 
+    0 0 20px -2px rgba(239, 68, 68, 0.35),
+    0 8px 24px -4px rgba(0, 0, 0, 0.15);
+}
+
+.security-border-loop::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 250vmax;
+  height: 250vmax;
+  transform: translate(-50%, -50%) rotate(0deg);
+  background: conic-gradient(
+    from 0deg,
+    #ef4444 0deg,
+    #fca5a5 35deg,
+    #dc2626 75deg,
+    transparent 125deg,
+    rgba(239, 68, 68, 0.25) 160deg,
+    transparent 195deg,
+    #ef4444 250deg,
+    #fda4af 295deg,
+    #b91c1c 340deg,
+    #ef4444 360deg
+  );
+  animation: securityBorderRotate 3.5s linear infinite;
+  z-index: 0;
+}
+

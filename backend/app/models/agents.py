@@ -34,6 +34,18 @@ class CitationItem(BaseModel):
     chunk_index: int = Field(..., description="Index of the specific chunk used")
 
 
+class SecurityCheckOutputRequest(BaseModel):
+    answer: str = Field(..., description="Generated answer text to validate")
+    retrieved_chunks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Retrieved document chunks against which to validate the answer"
+    )
+    classification_levels: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of classification levels to treat as sensitive"
+    )
+
+
 class RAGAskResponse(BaseModel):
     query: str = Field(..., description="Original user query")
     department_filter: Optional[str] = Field(default=None, description="Department pre-filter applied")
@@ -46,4 +58,8 @@ class RAGAskResponse(BaseModel):
     security_check: SecurityCheckResult = Field(
         ...,
         description="Rule-based pre-retrieval security audit validation result for auditability and transparency"
+    )
+    output_check: Optional[SecurityCheckResult] = Field(
+        default=None,
+        description="Rule-based post-generation output guardrail validation result"
     )
