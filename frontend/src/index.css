@@ -5,10 +5,46 @@
 @layer base {
   body {
     margin: 0;
-    font-family: 'Outfit', 'Inter', sans-serif;
+    font-family: 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
+}
+
+/* Glassmorphic Search & Card Shadows tailored to both Light and Dark themes */
+.glass-input-card-light {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 
+    0 20px 45px -10px rgba(37, 99, 235, 0.12),
+    0 8px 20px -6px rgba(15, 23, 42, 0.06),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+.glass-input-card-dark {
+  background: rgba(16, 20, 32, 0.82);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  box-shadow: 
+    0 25px 60px -15px rgba(0, 0, 0, 0.65),
+    0 0 35px -5px rgba(37, 99, 235, 0.18),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1);
+}
+
+@keyframes waveFloat {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.015);
+  }
+}
+
+.animate-wave-float {
+  animation: waveFloat 10s ease-in-out infinite;
 }
 
 /* 3D Iridescent Planetary Rotating Sphere (Clean Crisp Ball - No Outer Drop Shadow) */

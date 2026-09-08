@@ -25,7 +25,15 @@ class Settings(BaseSettings):
 
     # RAG & Storage Configuration
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
-    CHROMA_DATA_DIR: Path = BASE_DIR / "chroma_data"
+    CHROMA_DATA_DIR: Path = (
+        Path("/app/chroma_data")
+        if Path("/app/chroma_data").exists()
+        else (
+            BASE_DIR.parent / "chroma_data"
+            if (BASE_DIR.parent / "chroma_data").exists()
+            else BASE_DIR / "chroma_data"
+        )
+    )
     DOCUMENTS_DIR: Path = (
         Path("/app/documents")
         if Path("/app/documents").exists()

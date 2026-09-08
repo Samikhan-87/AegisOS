@@ -10,10 +10,7 @@ import {
   Database,
   Search,
   Paperclip,
-  Globe,
   Sparkles,
-  Mic,
-  Volume2,
   Send,
   MoreHorizontal,
   ChevronDown,
@@ -511,11 +508,23 @@ export function ChatShell() {
       {/* ========================================================================= */}
       <main className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative bg-[#F4F6FB] dark:bg-[#0C0D12] z-10">
         
-        {/* AMBIENT BOTTOM GLOW BACKDROP */}
-        <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[45rem] h-[22rem] bg-gradient-to-t from-sky-400/20 via-cyan-300/10 to-transparent dark:from-sky-500/20 dark:via-cyan-500/10 rounded-full blur-[130px] pointer-events-none z-0" />
+        {/* ABSTRACT 3D FLOWING WAVE BACKDROP (Images 1 & 2) */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 flex items-center justify-center">
+          <img
+            src={theme === 'dark' ? '/abstract_wave_dark.jpg' : '/abstract_wave_light.jpg'}
+            alt="Abstract Fluid Blue Wave"
+            className={`w-full h-full object-cover object-center scale-105 transition-all duration-700 select-none ${
+              theme === 'dark'
+                ? 'opacity-30 mix-blend-screen filter saturate-125'
+                : 'opacity-40 mix-blend-multiply filter contrast-105'
+            }`}
+          />
+          {/* Subtle vignette overlay to ensure pristine foreground contrast */}
+          <div className="absolute inset-0 bg-gradient-to-b from-[#F4F6FB]/85 via-transparent to-[#F4F6FB]/90 dark:from-[#0C0D12]/85 dark:via-transparent dark:to-[#0C0D12]/95" />
+        </div>
 
         {/* Fixed Top Header Bar */}
-        <header className="h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between border-b border-slate-200/80 dark:border-[#1A1C28] bg-[#F4F6FB]/90 dark:bg-[#0C0D12]/90 backdrop-blur-md z-30 overflow-visible">
+        <header className="h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between border-b border-slate-200/80 dark:border-[#1A1C28] bg-[#F4F6FB]/80 dark:bg-[#0C0D12]/80 backdrop-blur-md z-30 overflow-visible">
           <div className="flex items-center space-x-2 sm:space-x-3 overflow-visible py-1">
 
             {/* Mobile Hamburger Toggle */}
@@ -570,89 +579,117 @@ export function ChatShell() {
 
         {/* WORKSPACE BODY */}
         {messages.length === 0 ? (
-          /* INITIAL WELCOME SCREEN */
+          /* INITIAL WELCOME SCREEN (Inspired by Reference Images 1 & 2) */
           <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 flex flex-col justify-between items-center z-10">
-            <div className="max-w-3xl w-full my-auto text-center space-y-6 py-4">
+            <div className="max-w-3xl w-full my-auto text-center space-y-6 sm:space-y-7 py-4">
               
-              {/* 3D Iridescent Light Blue Sphere */}
+              {/* 3D Iridescent Planetary Rotating Sphere */}
               <div className="flex justify-center relative">
-                <div className="w-48 h-48 bg-sky-400/20 dark:bg-sky-500/20 rounded-full blur-[70px] absolute -top-6 left-1/2 -translate-x-1/2 pointer-events-none" />
-                <div className="iridescent-orb animate-pulse relative z-10" />
+                <div className="w-48 h-48 bg-sky-400/25 dark:bg-sky-500/20 rounded-full blur-[70px] absolute -top-6 left-1/2 -translate-x-1/2 pointer-events-none" />
+                <div className="iridescent-orb relative z-10 hover:scale-105 transition-transform duration-300" />
               </div>
 
               {/* Headings */}
-              <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-medium text-slate-900 dark:text-slate-100 tracking-tight">
-                  Good Evening, Aegis AI.
+              <div className="space-y-2">
+                <h1 className="text-3xl sm:text-5xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
+                  Secure AI Built for Enterprise
                 </h1>
-                <h2 className="text-xl sm:text-2xl font-medium text-slate-700 dark:text-slate-200 tracking-tight">
-                  Can I help you with anything ?
-                </h2>
+                <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto font-normal leading-relaxed">
+                  Query corporate policies, compliance directives, and banking operations with grounded RAG citations & deterministic security guardrails.
+                </p>
               </div>
 
-              {/* Centered Floating Input Card */}
-              <div className="bg-white dark:bg-[#151722] border border-slate-200/80 dark:border-[#232636] rounded-2xl p-4 sm:p-5 text-left space-y-3.5 shadow-xl relative z-10">
-                <textarea
-                  rows={2}
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                  placeholder="Message AI Chat..."
-                  className="w-full bg-transparent text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
-                />
+              {/* Centered Floating Input Card (Image 2 Style) */}
+              <div className="w-full max-w-2xl mx-auto relative group text-left">
+                {/* Subtle back-glow */}
+                <div className="absolute -inset-1 rounded-[30px] bg-gradient-to-r from-sky-400/20 via-blue-500/20 to-cyan-400/20 blur-xl opacity-60 group-hover:opacity-90 transition duration-500 pointer-events-none" />
 
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={handleBatchIngest}
-                      disabled={isIngesting}
-                      title="Batch Ingest PDFs (/ingest-all)"
-                      className="p-2 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors disabled:opacity-50"
-                    >
-                      {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-500 dark:text-sky-400" /> : <Paperclip className="w-4 h-4" />}
-                    </button>
+                {/* Frosted Glass Container */}
+                <div className="relative rounded-[26px] p-4 sm:p-5 transition-all duration-300 backdrop-blur-2xl
+                  bg-white/85 dark:bg-[#111624]/85 
+                  border border-white/90 dark:border-sky-500/20 
+                  shadow-[0_20px_50px_-10px_rgba(37,99,235,0.12),0_10px_20px_-5px_rgba(15,23,42,0.05)] 
+                  dark:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7),0_0_35px_-5px_rgba(37,99,235,0.18)]">
+                  
+                  <textarea
+                    rows={3}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    placeholder="Type something to generate or ask Aegis AI..."
+                    className="w-full bg-transparent text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium leading-relaxed"
+                  />
 
-                    <button
-                      type="button"
-                      onClick={() => handleSendMessage('Search compliance & customer privacy rules')}
-                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 transition-colors"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                      <span>RAG Hybrid Search</span>
-                    </button>
+                  {/* Bottom Controls Row: Pill Chips on Left, Action Buttons on Right */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+                    
+                    {/* Left Side: Department Filter Pill Chips (like [Android] [iOS] in Image 2) */}
+                    <div className="flex items-center flex-wrap gap-1.5 sm:gap-2">
+                      {['ALL', 'AI Governance', 'Banking Operations', 'Compliance', 'Customer Service'].map((dept) => {
+                        const isSelected = activeDepartment === dept;
+                        return (
+                          <button
+                            key={dept}
+                            type="button"
+                            onClick={() => setActiveDepartment(dept)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
+                              isSelected
+                                ? 'bg-slate-900 text-white shadow-xs dark:bg-sky-500 dark:text-slate-950 dark:font-bold'
+                                : 'bg-slate-100/90 hover:bg-slate-200/90 text-slate-600 hover:text-slate-900 dark:bg-slate-800/70 dark:hover:bg-slate-700/80 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200/60 dark:border-slate-700/50'
+                            }`}
+                          >
+                            {dept === 'ALL' ? 'All Policies' : dept}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleSendMessage('Who is the document owner for AB-AI-004?')}
-                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] hover:bg-slate-200 dark:hover:bg-[#25293E] border border-slate-200 dark:border-[#2A2E44] text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5 transition-colors hidden sm:flex"
-                    >
-                      <Globe className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                      <span>Ask Ollama RAG</span>
-                    </button>
+                    {/* Right Side: Batch Ingest Paperclip + High-contrast Pill "Generate" Button */}
+                    <div className="flex items-center space-x-2 ml-auto">
+                      <button
+                        type="button"
+                        onClick={handleBatchIngest}
+                        disabled={isIngesting}
+                        title="Batch Ingest PDFs (/ingest-all)"
+                        className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all disabled:opacity-50 border border-slate-200/60 dark:border-slate-700/60"
+                      >
+                        {isIngesting ? (
+                          <RefreshCw className="w-4 h-4 animate-spin text-sky-500" />
+                        ) : (
+                          <Paperclip className="w-4 h-4" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSendMessage()}
+                        disabled={!inputMessage.trim() || isProcessing}
+                        className="px-5 py-2.5 rounded-full font-bold text-xs sm:text-sm flex items-center space-x-2 transition-all duration-200 shadow-md active:scale-95 disabled:opacity-40 disabled:pointer-events-none
+                          bg-slate-900 hover:bg-slate-800 text-white dark:bg-gradient-to-r dark:from-sky-500 dark:via-blue-600 dark:to-indigo-600 dark:hover:from-sky-400 dark:hover:to-indigo-500 dark:shadow-sky-500/25"
+                      >
+                        <span>Generate</span>
+                        <Send className="w-3.5 h-3.5 stroke-[2.5]" />
+                      </button>
+                    </div>
+
                   </div>
+                </div>
 
-                  <div className="flex items-center space-x-1.5">
-                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-                      <Mic className="w-4 h-4" />
-                    </button>
-                    <button type="button" className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-                      <Volume2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendMessage()}
-                      disabled={!inputMessage.trim() || isProcessing}
-                      className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold transition-colors shadow-md"
-                    >
-                      <Send className="w-4 h-4 stroke-[2.5]" />
-                    </button>
-                  </div>
+                {/* Tagline / Metric ticker below card (like "• Launch app 10x faster" in Image 2) */}
+                <div className="flex items-center justify-center space-x-2.5 sm:space-x-3 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium pt-3.5">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                    Deterministic Guardrails
+                  </span>
+                  <span>•</span>
+                  <span>Grounded RAG Citations</span>
+                  <span className="hidden sm:inline">•</span>
+                  <span className="hidden sm:inline">Local Ollama (gemma2:2b)</span>
                 </div>
               </div>
 
@@ -660,9 +697,12 @@ export function ChatShell() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 pt-1 relative z-10">
                 <button
                   onClick={() => handleSendMessage('Who is the document owner for AB-AI-004?')}
-                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5 shadow-md"
+                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-md"
                 >
-                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Smart RAG Agent</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                    <span>Smart RAG Agent</span>
+                    <Sparkles className="w-3.5 h-3.5 text-sky-500" />
+                  </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
                     Queries local Ollama LLM with hybrid RRF retrieval & grounded document citations.
                   </div>
@@ -670,9 +710,12 @@ export function ChatShell() {
 
                 <button
                   onClick={() => handleSendMessage('What is the Business Continuity Plan for Disaster Recovery?')}
-                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all space-y-1.5 shadow-md"
+                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-md"
                 >
-                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Security Audit</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                    <span>Security Audit</span>
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
                     Evaluates system directives against PII boundaries and corporate incident plans.
                   </div>
@@ -680,11 +723,14 @@ export function ChatShell() {
 
                 <button
                   onClick={() => handleSendMessage('What are the Responsible AI & LLM Security Guidelines?')}
-                  className="bg-white dark:bg-[#151722] hover:bg-slate-50 dark:hover:bg-[#1A1D2B] border border-slate-200 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all sm:col-span-2 md:col-span-1 shadow-md"
+                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 sm:col-span-2 md:col-span-1 shadow-md space-y-1.5"
                 >
-                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100">Compliance Scope</div>
+                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                    <span>Compliance Scope</span>
+                    <Lock className="w-3.5 h-3.5 text-cyan-500" />
+                  </div>
                   <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-normal">
-                    Enforces pre-filtering over 9 corporate departments without cross-leaks.
+                    Enforces pre-filtering over corporate departments without cross-department leaks.
                   </div>
                 </button>
               </div>
@@ -852,9 +898,14 @@ export function ChatShell() {
             </div>
 
             {/* SEAMLESS FLOATING COMPOSER */}
-            <div className="shrink-0 px-4 sm:px-6 pt-2 pb-4 sm:pb-5">
+            <div className="shrink-0 px-4 sm:px-6 pt-2 pb-4 sm:pb-5 z-20">
               <div className="max-w-3xl mx-auto w-full">
-                <div className="bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-3.5 text-left space-y-2.5 shadow-xl">
+                <div className="relative rounded-2xl sm:rounded-[24px] p-3.5 sm:p-4 transition-all duration-200 backdrop-blur-2xl
+                  bg-white/90 dark:bg-[#111624]/90 
+                  border border-white/80 dark:border-sky-500/20 
+                  shadow-[0_15px_35px_-5px_rgba(37,99,235,0.1),0_5px_15px_-3px_rgba(15,23,42,0.05)] 
+                  dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.7),0_0_30px_-5px_rgba(37,99,235,0.2)]">
+                  
                   <textarea
                     rows={2}
                     value={inputMessage}
@@ -865,32 +916,49 @@ export function ChatShell() {
                         handleSendMessage();
                       }
                     }}
-                    placeholder="Message AI Chat..."
-                    className="w-full bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
+                    placeholder="Type something to generate or ask Aegis AI..."
+                    className="w-full bg-transparent text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
                   />
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80">
                     <div className="flex items-center space-x-2">
                       <button
                         type="button"
                         onClick={handleBatchIngest}
                         disabled={isIngesting}
-                        className="p-1.5 rounded-xl bg-slate-100 dark:bg-[#1D2030] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-50"
+                        title="Batch Ingest PDFs (/ingest-all)"
+                        className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-50 border border-slate-200/60 dark:border-slate-700/60 transition-all"
                       >
-                        {isIngesting ? <RefreshCw className="w-4 h-4 animate-spin text-sky-500 dark:text-sky-400" /> : <Paperclip className="w-4 h-4" />}
+                        {isIngesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-500" /> : <Paperclip className="w-3.5 h-3.5" />}
                       </button>
-                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-medium truncate max-w-[200px] sm:max-w-none">
-                        Filter: {activeDepartment} | Mode: {searchMode}
-                      </span>
+
+                      <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-[200px] sm:max-w-xs">
+                        {['ALL', 'AI Governance', 'Banking Operations', 'Compliance'].map((dept) => (
+                          <button
+                            key={dept}
+                            type="button"
+                            onClick={() => setActiveDepartment(dept)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
+                              activeDepartment === dept
+                                ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-slate-950 font-bold'
+                                : 'bg-slate-100/90 hover:bg-slate-200 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            {dept === 'ALL' ? 'All' : dept}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim() || isProcessing}
-                      className="p-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold transition-colors shadow-md"
+                      className="px-5 py-2 rounded-full font-bold text-xs sm:text-sm flex items-center space-x-2 transition-all duration-200 shadow-md active:scale-95 disabled:opacity-40
+                        bg-slate-900 hover:bg-slate-800 text-white dark:bg-gradient-to-r dark:from-sky-500 dark:via-blue-600 dark:to-indigo-600 dark:hover:from-sky-400 dark:hover:to-indigo-500 dark:shadow-sky-500/25"
                     >
-                      <Send className="w-4 h-4 stroke-[2.5]" />
+                      <span>Generate</span>
+                      <Send className="w-3.5 h-3.5 stroke-[2.5]" />
                     </button>
                   </div>
                 </div>
