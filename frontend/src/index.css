@@ -191,3 +191,50 @@
   z-index: 0;
 }
 
+/* ========================================================================= */
+/* CONTINUOUS LOOKING ROBOT AVATAR ANIMATIONS (Left -> Center -> Right -> Center) */
+/* ========================================================================= */
+@keyframes botGazeLook {
+  0%, 15% {
+    /* Looking Straight / Center */
+    transform: translate(0px, 0px) scale(1);
+  }
+  22%, 40% {
+    /* Look Left (matching Image 1) */
+    transform: translate(-14px, -2px) scaleX(0.92);
+  }
+  48%, 62% {
+    /* Return to Center */
+    transform: translate(0px, 0px) scale(1);
+  }
+  70%, 88% {
+    /* Look Right (matching Image 3) */
+    transform: translate(14px, -2px) scaleX(0.92);
+  }
+  95%, 100% {
+    /* Return to Center */
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+@keyframes botHeadSway {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-2px) rotate(-2deg);
+  }
+  75% {
+    transform: translateY(-2px) rotate(2deg);
+  }
+}
+
+.animate-bot-gaze {
+  animation: botGazeLook 6.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-origin: 80px 85px;
+}
+
+.animate-bot-head-sway {
+  animation: botHeadSway 6.5s ease-in-out infinite;
+  transform-origin: 80px 85px;
+}

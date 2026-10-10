@@ -114,8 +114,8 @@ def generate_node(state: AgentState) -> dict[str, Any]:
             "citations": []
         }
 
-    # Pass only top 3 highest-scoring chunks to LLM prompt to reduce prompt length and CPU generation latency
-    prompt_chunks = chunks[:3]
+    # Pass top 2 highest-scoring chunks to LLM prompt to reduce prompt length and CPU generation latency
+    prompt_chunks = chunks[:2]
 
     # Format context blocks for LLM prompt using top 3 chunks
     context_blocks: list[str] = []

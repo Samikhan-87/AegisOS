@@ -4,8 +4,11 @@ API Routes for LangGraph RAG Agent and Security Auditor.
 
 from fastapi import APIRouter, HTTPException, status
 from app.agents.rag_agent import run_rag_agent
+from app.agents.router_agent import run_router_agent
 from app.agents.security_auditor import check_input, check_output
 from app.models.agents import (
+    AgentAskRequest,
+    AgentAskResponse,
     RAGAskRequest,
     RAGAskResponse,
     SecurityCheckOutputRequest,
@@ -14,6 +17,66 @@ from app.models.agents import (
 )
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+@router.post(
+    "/ask",
+    response_model=AgentAskResponse,
+    summary="Unified Multi-Agent Orchestrator Endpoint (Router Agent)",
+    description=(
+        "Acts as the unified entry point for all user requests across Aegis OS. "
+        "Executes the top-level Router/Orchestrator LangGraph workflow: "
+        "1) Evaluates user intent to determine the specialized destination agent, "
+        "2) Routes to the specialized agent (e.g., RAG Retriever with full Security Guardrails) "
+        "   or to an unsupported capability handler, "
+        "3) Returns a unified response containing 'routed_to', 'answer', 'citations', "
+        "   'retrieved_chunks', 'security_check', and 'output_check'."
+    ),
+)
+async def ask_agent_router(request: AgentAskRequest) -> AgentAskResponse:
+    try:
+        result = run_router_agent(
+            query=request.query,
+            department_filter=request.department_filter
+        )
+
+        sec_check_data = result.get("security_check")
+        if not isinstance(sec_check_data, dict) or "is_safe" not in sec_check_data:
+            sec_check_data = {
+                "is_safe": True,
+                "risk_level": "none",
+                "flagged_patterns": [],
+                "reason": "Default safety pass."
+            }
+
+        output_check_data = result.get("output_check")
+        if not isinstance(output_check_data, dict) or "is_safe" not in output_check_data:
+            output_check_data = {
+                "is_safe": True,
+                "risk_level": "none",
+                "flagged_patterns": [],
+                "reason": (
+                    "Output validation skipped: query blocked at input security boundary."
+                    if not sec_check_data.get("is_safe", True)
+                    else "Default safety pass."
+                )
+            }
+
+        return AgentAskResponse(
+            query=result["query"],
+            department_filter=result.get("department_filter"),
+            routed_to=result.get("routed_to", "rag_retriever"),
+            answer=result["answer"],
+            citations=result.get("citations", []),
+            retrieved_chunks=result.get("retrieved_chunks", []),
+            security_check=sec_check_data,
+            output_check=output_check_data,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to execute Router Agent workflow: {str(e)}",
+        ) from e
 
 
 @router.post(

@@ -46,7 +46,11 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
 
     class Config:
-        env_file = ".env"
+        env_file = [
+            str(BASE_DIR / ".env"),
+            str(BASE_DIR.parent / ".env"),
+            ".env"
+        ]
         case_sensitive = True
 
 settings = Settings()

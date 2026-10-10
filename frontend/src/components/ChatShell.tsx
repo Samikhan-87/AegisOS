@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { askRAGAgent } from '../services/api';
 import type { Citation, RAGAskPayload } from '../services/api';
+import { AnimatedBotAvatar } from './AnimatedBotAvatar';
 import {
   Home,
   LayoutGrid,
   Compass,
-  History,
   Database,
   Search,
   Paperclip,
@@ -28,7 +28,12 @@ import {
   RefreshCw,
   Menu,
   X,
-  Bot
+  Bot,
+  Copy,
+  Check,
+  MessageSquare,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 interface ExecutionStep {
@@ -66,6 +71,13 @@ interface Message {
     mode?: string;
   };
   isSecurityBlocked?: boolean;
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  messages: Message[];
 }
 
 interface Agent {
@@ -201,7 +213,6 @@ export function ChatShell() {
   const [activeDepartment, setActiveDepartment] = useState<string>('ALL');
   const [searchMode, setSearchMode] = useState<'hybrid' | 'vector' | 'bm25'>('hybrid');
   const [inputMessage, setInputMessage] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loadingStepText, setLoadingStepText] = useState('Searching ChromaDB vectors & BM25 keyword index...');
@@ -211,9 +222,129 @@ export function ChatShell() {
     totalChunks: number;
   } | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [searchHistoryQuery, setSearchHistoryQuery] = useState('');
+
+  const handleCopyMessage = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMessageId(id);
+    setTimeout(() => {
+      setCopiedMessageId((prev) => (prev === id ? null : prev));
+    }, 2000);
+  };
+
+  // LocalStorage-backed chat session history (like ChatGPT)
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis_chat_sessions');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Error loading sessions from localStorage', e);
+    }
+    return [];
+  });
+
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
+    try {
+      const activeId = localStorage.getItem('aegis_active_session_id');
+      if (activeId) return activeId;
+    } catch (e) {}
+    return 'default';
+  });
+
+  // Load initial messages for active session or fresh session
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try {
+      const saved = localStorage.getItem('aegis_chat_sessions');
+      const activeId = localStorage.getItem('aegis_active_session_id') || 'default';
+      if (saved) {
+        const parsed: ChatSession[] = JSON.parse(saved);
+        const active = parsed.find((s) => s.id === activeId);
+        if (active && active.messages) return active.messages;
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  // Sync messages into sessions and save to localStorage
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    setSessions((prevSessions) => {
+      const sessionTitle = messages[0]?.text.slice(0, 36) + (messages[0]?.text.length > 36 ? '...' : '') || 'New Chat';
+      const existingIndex = prevSessions.findIndex((s) => s.id === currentSessionId);
+      
+      let updated: ChatSession[];
+      if (existingIndex >= 0) {
+        updated = [...prevSessions];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          title: updated[existingIndex].title || sessionTitle,
+          messages: messages
+        };
+      } else {
+        updated = [
+          {
+            id: currentSessionId,
+            title: sessionTitle,
+            createdAt: Date.now(),
+            messages: messages
+          },
+          ...prevSessions
+        ];
+      }
+
+      try {
+        localStorage.setItem('aegis_chat_sessions', JSON.stringify(updated));
+        localStorage.setItem('aegis_active_session_id', currentSessionId);
+      } catch (e) {}
+
+      return updated;
+    });
+  }, [messages, currentSessionId]);
+
+  // Handle switching to a past chat session
+  const handleSelectSession = (session: ChatSession) => {
+    setCurrentSessionId(session.id);
+    setMessages(session.messages || []);
+    try {
+      localStorage.setItem('aegis_active_session_id', session.id);
+    } catch (e) {}
+    setMobileNavOpen(false);
+  };
+
+  // Handle starting a new chat session
+  const handleNewChat = () => {
+    const newId = 'session_' + Date.now();
+    setCurrentSessionId(newId);
+    setMessages([]);
+    try {
+      localStorage.setItem('aegis_active_session_id', newId);
+    } catch (e) {}
+    setMobileNavOpen(false);
+  };
+
+  // Handle deleting a chat session
+  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessions((prev) => {
+      const filtered = prev.filter((s) => s.id !== sessionId);
+      try {
+        localStorage.setItem('aegis_chat_sessions', JSON.stringify(filtered));
+      } catch (err) {}
+      return filtered;
+    });
+
+    if (currentSessionId === sessionId) {
+      handleNewChat();
+    }
+  };
 
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const queryStartMsRef = useRef<number>(Date.now());
 
   useEffect(() => {
     const root = document.documentElement;
@@ -232,6 +363,7 @@ export function ChatShell() {
   const ragMutation = useMutation({
     mutationFn: (payload: RAGAskPayload) => askRAGAgent(payload),
     onMutate: (variables) => {
+      queryStartMsRef.current = Date.now();
       // Create user message in chat thread
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -245,6 +377,8 @@ export function ChatShell() {
     },
     onSuccess: (data, variables) => {
       const isSecurityBlocked = data.security_check && data.security_check.is_safe === false;
+      const totalElapsedMs = Math.max(Date.now() - queryStartMsRef.current, 100);
+      const llmLatencyMs = isSecurityBlocked ? 0 : Math.max(totalElapsedMs - 145, 80);
 
       const sources: KnowledgeSource[] = (data.retrieved_chunks || []).map((item: any) => ({
         title: item.metadata?.source_filename || item.metadata?.filename || 'Document.pdf',
@@ -262,7 +396,7 @@ export function ChatShell() {
         : [
             { step: 'Security Guardrail (Pass)', agent: 'Security Auditor', latencyMs: 2, status: 'completed' },
             { step: 'Hybrid Retrieval (BM25 + ChromaDB)', agent: 'RAG Retriever', latencyMs: 140, status: 'completed' },
-            { step: 'Grounded LLM Answer (Ollama)', agent: 'Ollama LLM', latencyMs: 820, status: 'completed' },
+            { step: 'Grounded LLM Answer (Ollama)', agent: 'Ollama LLM', latencyMs: llmLatencyMs, status: 'completed' },
             { step: 'Output Compliance Guardrail', agent: 'Security Auditor', latencyMs: 3, status: 'completed' }
           ];
 
@@ -281,7 +415,7 @@ export function ChatShell() {
         sources,
         citations: data.citations || [],
         observability: {
-          latencyMs: isSecurityBlocked ? 5 : 968,
+          latencyMs: isSecurityBlocked ? 5 : totalElapsedMs,
           totalTokens: Math.round(variables.query.length / 4) + (isSecurityBlocked ? 12 : 240),
           embeddingDim: 384,
           preFilterApplied: !!variables.department_filter,
@@ -402,35 +536,44 @@ export function ChatShell() {
   ];
 
   return (
-    <div className="flex h-dvh w-screen bg-[#F4F6FB] dark:bg-[#0C0D12] text-slate-900 dark:text-slate-100 font-sans select-none overflow-hidden relative">
+    <div className="flex h-dvh w-screen bg-[#ECEEF4] dark:bg-[#0C0D12] text-slate-900 dark:text-slate-100 font-sans select-none overflow-hidden relative">
       
       {/* ========================================================================= */}
       {/* 1. SIDEBAR */}
       {/* ========================================================================= */}
       <aside
-        className={`fixed md:relative inset-y-0 left-0 w-64 sm:w-72 bg-[#F8FAFC] dark:bg-[#0A0B0F] border-r border-slate-200/80 dark:border-[#1B1D28] flex flex-col justify-between z-40 transition-transform duration-300 transform ${
+        className={`fixed md:relative inset-y-0 left-0 w-64 sm:w-72 bg-[#F6F7FB] dark:bg-[#0A0B0F] border-r border-slate-300/70 dark:border-[#1B1D28] flex flex-col justify-between z-40 transition-transform duration-300 transform ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } shrink-0 p-5`}
       >
         <div className="space-y-6">
-          {/* Brand Header */}
+          {/* Brand Header with AnimatedBotAvatar in Logo */}
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center space-x-2.5">
-              <div className="iridescent-orb-sm shadow-md" />
+              <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-slate-100 dark:bg-[#161824] border border-slate-200/80 dark:border-[#252838] shadow-xs">
+                <AnimatedBotAvatar size={26} />
+              </div>
               <span className="font-bold text-lg text-slate-900 dark:text-white tracking-tight">Aegis OS</span>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5">
+              <button
+                onClick={handleNewChat}
+                title="New Chat"
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:border-sky-500/30 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
               <button
                 onClick={toggleTheme}
                 title="Toggle Theme"
-                className="p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
               </button>
               <button
                 onClick={() => setMobileNavOpen(false)}
-                className="md:hidden p-2 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400"
+                className="md:hidden p-1.5 rounded-xl border border-slate-200 dark:border-[#232636] bg-slate-100 dark:bg-[#141620] text-slate-600 dark:text-slate-400"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -439,11 +582,13 @@ export function ChatShell() {
 
           {/* Search Chats Input */}
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
             <input
               type="text"
+              value={searchHistoryQuery}
+              onChange={(e) => setSearchHistoryQuery(e.target.value)}
               placeholder="Search chats..."
-              className="w-full bg-white dark:bg-[#141620] border border-slate-200 dark:border-[#232636] rounded-xl pl-10 pr-9 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500/60 font-medium shadow-xs"
+              className="w-full bg-white dark:bg-[#141620] border border-slate-200 dark:border-[#232636] rounded-xl pl-9 pr-9 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500/60 font-medium shadow-xs"
             />
             <span className="absolute right-3 top-2 text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1E202C] px-1.5 py-0.5 rounded border border-slate-200 dark:border-[#2A2D3D]">
               ⌘K
@@ -452,9 +597,19 @@ export function ChatShell() {
 
           {/* Core Navigation Links */}
           <nav className="space-y-1 text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-semibold">
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sky-800 dark:text-slate-100 bg-sky-500/10 dark:bg-[#171924] border border-sky-500/20 dark:border-[#252838] shadow-xs">
-              <Home className="w-4 h-4 text-sky-500 dark:text-sky-400" />
-              <span>Home</span>
+            <button
+              onClick={handleNewChat}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all ${
+                messages.length === 0
+                  ? 'text-sky-800 dark:text-slate-100 bg-sky-500/10 dark:bg-[#171924] border border-sky-500/20 dark:border-[#252838] shadow-xs'
+                  : 'hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620]'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <Home className="w-4 h-4 text-sky-500 dark:text-sky-400" />
+                <span>New Chat</span>
+              </div>
+              <Plus className="w-3.5 h-3.5 text-slate-400" />
             </button>
             <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <LayoutGrid className="w-4 h-4 text-slate-400" />
@@ -465,32 +620,56 @@ export function ChatShell() {
               <span>Explore</span>
             </button>
             <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
-              <History className="w-4 h-4 text-slate-400" />
-              <span>History</span>
-            </button>
-            <button className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] transition-colors">
               <Database className="w-4 h-4 text-slate-400" />
               <span>Vector Store</span>
             </button>
           </nav>
 
-          {/* Time-Based Recent Operations List */}
-          <div className="space-y-4 pt-2 border-t border-slate-200/80 dark:border-[#1A1C28]">
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono px-3 mb-2">Tomorrow</div>
-              <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
-                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">What's one lesson life has taught...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Security Audit Compliance Directive...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">GDPR Data Retention Schedule...</div>
-              </div>
+          {/* ChatGPT-Style LocalStorage Chat History */}
+          <div className="pt-2 border-t border-slate-200/80 dark:border-[#1A1C28] flex-1 overflow-y-auto max-h-[42vh] no-scrollbar space-y-3">
+            <div className="flex items-center justify-between px-3">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                Recent Chats ({sessions.length})
+              </span>
             </div>
 
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono px-3 mb-2">10 days Ago</div>
-              <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
-                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Disaster Recovery BCP Plan...</div>
-                <div className="px-3 py-1.5 truncate hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620] rounded-lg cursor-pointer">Responsible AI Prompt Policy...</div>
-              </div>
+            <div className="space-y-1 text-xs">
+              {sessions.length === 0 ? (
+                <div className="px-3 py-2 text-[11px] text-slate-400 italic font-normal">
+                  No saved conversations yet. Ask a question to start history!
+                </div>
+              ) : (
+                sessions
+                  .filter((s) => !searchHistoryQuery.trim() || s.title.toLowerCase().includes(searchHistoryQuery.toLowerCase()))
+                  .map((session) => {
+                    const isActive = currentSessionId === session.id;
+                    return (
+                      <div
+                        key={session.id}
+                        onClick={() => handleSelectSession(session)}
+                        className={`group flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all duration-150 ${
+                          isActive
+                            ? 'bg-sky-500/10 text-sky-900 dark:bg-sky-500/15 dark:text-sky-200 font-semibold border border-sky-500/20'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#141620]'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2.5 truncate min-w-0 pr-2">
+                          <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-sky-500' : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`} />
+                          <span className="truncate text-xs">{session.title}</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteSession(session.id, e)}
+                          title="Delete chat"
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-500 transition-all shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
             </div>
           </div>
         </div>
@@ -521,7 +700,7 @@ export function ChatShell() {
       {/* ========================================================================= */}
       {/* 2. MAIN WORKSPACE (UNIFIED CONTINUOUS CHAT SCREEN) */}
       {/* ========================================================================= */}
-      <main className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative bg-[#F4F6FB] dark:bg-[#0C0D12] z-10">
+      <main className="flex-1 flex flex-col h-full min-h-0 overflow-hidden relative bg-[#ECEEF4] dark:bg-[#0C0D12] z-10">
         
         {/* ABSTRACT 3D FLOWING WAVE BACKDROP - SEAMLESS HORIZONTAL NEWS TICKER LOOP */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
@@ -538,7 +717,7 @@ export function ChatShell() {
                 className={`w-full h-full object-cover object-center select-none ${
                   theme === 'dark'
                     ? 'opacity-35 mix-blend-screen filter saturate-125'
-                    : 'opacity-40 mix-blend-multiply filter contrast-105'
+                    : 'opacity-55 mix-blend-multiply filter contrast-110 saturate-110'
                 }`}
               />
             </div>
@@ -549,18 +728,18 @@ export function ChatShell() {
                 className={`w-full h-full object-cover object-center select-none scale-x-[-1] ${
                   theme === 'dark'
                     ? 'opacity-35 mix-blend-screen filter saturate-125'
-                    : 'opacity-40 mix-blend-multiply filter contrast-105'
+                    : 'opacity-55 mix-blend-multiply filter contrast-110 saturate-110'
                 }`}
               />
             </div>
           </div>
 
           {/* Subtle vignette overlay to ensure pristine foreground contrast */}
-          <div className="absolute inset-0 bg-gradient-to-b from-[#F4F6FB]/85 via-transparent to-[#F4F6FB]/90 dark:from-[#0C0D12]/85 dark:via-transparent dark:to-[#0C0D12]/95" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#ECEEF4]/60 via-transparent to-[#ECEEF4]/85 dark:from-[#0C0D12]/85 dark:via-transparent dark:to-[#0C0D12]/95" />
         </div>
 
         {/* Fixed Top Header Bar */}
-        <header className="h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between border-b border-slate-200/80 dark:border-[#1A1C28] bg-[#F4F6FB]/80 dark:bg-[#0C0D12]/80 backdrop-blur-md z-30 overflow-visible">
+        <header className="h-16 shrink-0 px-4 sm:px-6 flex items-center justify-between border-b border-slate-300/70 dark:border-[#1A1C28] bg-[#F6F7FB]/90 dark:bg-[#0C0D12]/80 backdrop-blur-md z-30 overflow-visible">
           <div className="flex items-center space-x-2 sm:space-x-3 overflow-visible py-1">
 
             {/* Mobile Hamburger Toggle */}
@@ -619,10 +798,12 @@ export function ChatShell() {
           <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 flex flex-col justify-between items-center z-10">
             <div className="max-w-3xl w-full my-auto text-center space-y-6 sm:space-y-7 py-4">
               
-              {/* 3D Iridescent Planetary Rotating Sphere */}
+              {/* Animated Continuous Looking Robot Avatar (Left -> Center -> Right -> Center) */}
               <div className="flex justify-center relative">
-                <div className="w-48 h-48 bg-sky-400/25 dark:bg-sky-500/20 rounded-full blur-[70px] absolute -top-6 left-1/2 -translate-x-1/2 pointer-events-none" />
-                <div className="iridescent-orb relative z-10 hover:scale-105 transition-transform duration-300" />
+                <div className="w-56 h-56 bg-sky-400/20 dark:bg-sky-500/15 rounded-full blur-[80px] absolute -top-8 left-1/2 -translate-x-1/2 pointer-events-none" />
+                <div className="relative z-10 transition-transform duration-300 hover:scale-105 cursor-pointer">
+                  <AnimatedBotAvatar size={135} />
+                </div>
               </div>
 
               {/* Headings */}
@@ -642,9 +823,9 @@ export function ChatShell() {
 
                 {/* Frosted Glass Container */}
                 <div className="relative rounded-[26px] p-4 sm:p-5 transition-all duration-300 backdrop-blur-2xl
-                  bg-white/85 dark:bg-[#111624]/85 
-                  border border-white/90 dark:border-sky-500/20 
-                  shadow-[0_20px_50px_-10px_rgba(37,99,235,0.12),0_10px_20px_-5px_rgba(15,23,42,0.05)] 
+                  bg-white/95 dark:bg-[#111624]/85 
+                  border border-slate-300/80 dark:border-sky-500/20 
+                  shadow-[0_20px_45px_-12px_rgba(15,23,42,0.14),0_4px_12px_-2px_rgba(15,23,42,0.06)] 
                   dark:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7),0_0_35px_-5px_rgba(37,99,235,0.18)]">
                   
                   <textarea
@@ -662,7 +843,7 @@ export function ChatShell() {
                   />
 
                   {/* Bottom Controls Row: Pill Chips on Left, Action Buttons on Right */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200/90 dark:border-slate-800/80">
                     
                     {/* Left Side: Department Filter Pill Chips (like [Android] [iOS] in Image 2) */}
                     <div className="flex items-center flex-wrap gap-1.5 sm:gap-2">
@@ -673,10 +854,10 @@ export function ChatShell() {
                             key={dept}
                             type="button"
                             onClick={() => setActiveDepartment(dept)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-all duration-200 ${
                               isSelected
                                 ? 'bg-slate-900 text-white shadow-xs dark:bg-sky-500 dark:text-slate-950 dark:font-bold'
-                                : 'bg-slate-100/90 hover:bg-slate-200/90 text-slate-600 hover:text-slate-900 dark:bg-slate-800/70 dark:hover:bg-slate-700/80 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200/60 dark:border-slate-700/50'
+                                : 'bg-slate-200/70 hover:bg-slate-300/80 text-slate-700 hover:text-slate-900 dark:bg-slate-800/70 dark:hover:bg-slate-700/80 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-300/60 dark:border-slate-700/50'
                             }`}
                           >
                             {dept === 'ALL' ? 'All Policies' : dept}
@@ -692,7 +873,7 @@ export function ChatShell() {
                         onClick={handleBatchIngest}
                         disabled={isIngesting}
                         title="Batch Ingest PDFs (/ingest-all)"
-                        className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all disabled:opacity-50 border border-slate-200/60 dark:border-slate-700/60"
+                        className="p-2.5 rounded-full bg-slate-200/70 hover:bg-slate-300/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all disabled:opacity-50 border border-slate-300/60 dark:border-slate-700/60"
                       >
                         {isIngesting ? (
                           <RefreshCw className="w-4 h-4 animate-spin text-sky-500" />
@@ -733,7 +914,7 @@ export function ChatShell() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 pt-1 relative z-10">
                 <button
                   onClick={() => handleSendMessage('Who is the document owner for AB-AI-004?')}
-                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-md"
+                  className="bg-white/95 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-300/80 dark:border-[#232636] hover:border-sky-500/50 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.08)]"
                 >
                   <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
                     <span>Smart RAG Agent</span>
@@ -746,7 +927,7 @@ export function ChatShell() {
 
                 <button
                   onClick={() => handleSendMessage('What is the Business Continuity Plan for Disaster Recovery?')}
-                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-md"
+                  className="bg-white/95 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-300/80 dark:border-[#232636] hover:border-sky-500/50 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 space-y-1.5 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.08)]"
                 >
                   <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
                     <span>Security Audit</span>
@@ -759,7 +940,7 @@ export function ChatShell() {
 
                 <button
                   onClick={() => handleSendMessage('What are the Responsible AI & LLM Security Guidelines?')}
-                  className="bg-white/80 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-200/80 dark:border-[#232636] hover:border-sky-500/40 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 sm:col-span-2 md:col-span-1 shadow-md space-y-1.5"
+                  className="bg-white/95 dark:bg-[#121624]/80 backdrop-blur-md hover:bg-white dark:hover:bg-[#181D2E] border border-slate-300/80 dark:border-[#232636] hover:border-sky-500/50 rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5 sm:col-span-2 md:col-span-1 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.08)] space-y-1.5"
                 >
                   <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
                     <span>Compliance Scope</span>
@@ -784,9 +965,23 @@ export function ChatShell() {
                   <div key={msg.id} className="space-y-3">
                     {msg.sender === 'user' ? (
                       /* User Message Row */
-                      <div className="flex items-start justify-end space-x-3">
-                        <div className="max-w-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white px-5 py-3 rounded-2xl shadow-md text-sm leading-relaxed font-medium">
+                      <div className="flex items-start justify-end space-x-3 group">
+                        <div className="relative max-w-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white px-5 py-3 rounded-2xl shadow-md text-sm leading-relaxed font-medium">
                           {msg.text}
+                          
+                          {/* Aesthetic Glass Copy Button for User Message */}
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.id, msg.text)}
+                            title="Copy message"
+                            className="absolute -left-10 top-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-200 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 backdrop-blur-md border border-white/20 dark:border-slate-700/60 text-white/80 hover:text-white shadow-xs"
+                          >
+                            {copiedMessageId === msg.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-300 animate-in zoom-in-75 duration-150" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
                         </div>
                         <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-sky-600 flex items-center justify-center font-bold text-white text-xs shadow-md shrink-0 mt-0.5">
                           JM
@@ -794,8 +989,10 @@ export function ChatShell() {
                       </div>
                     ) : (
                       /* AI Agent Response Row */
-                      <div className="flex items-start space-x-3">
-                        <div className="iridescent-orb-sm mt-1" />
+                      <div className="flex items-start space-x-3 group">
+                        <div className="shrink-0 mt-0.5">
+                          <AnimatedBotAvatar size={36} />
+                        </div>
 
                         {/* AI Agent Response Card Container */}
                         <div
@@ -818,7 +1015,29 @@ export function ChatShell() {
                                   {msg.isSecurityBlocked ? 'GUARDRAIL BLOCKED' : searchMode.toUpperCase()}
                                 </span>
                               </div>
-                              <span className="text-slate-500 dark:text-slate-400 font-mono text-xs">{msg.timestamp}</span>
+                              <div className="flex items-center space-x-2">
+                                <span className="text-slate-500 dark:text-slate-400 font-mono text-xs">{msg.timestamp}</span>
+                                
+                                {/* Aesthetic Minimalist Copy Trigger */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyMessage(msg.id, msg.text)}
+                                  title="Copy response"
+                                  className="flex items-center space-x-1 px-2 py-1 rounded-md text-[11px] font-mono font-medium transition-all duration-200 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 border border-slate-200/60 dark:border-slate-700/50"
+                                >
+                                  {copiedMessageId === msg.id ? (
+                                    <>
+                                      <Check className="w-3 h-3 text-emerald-500 animate-in zoom-in-75 duration-150" />
+                                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3 h-3 text-slate-500 dark:text-slate-400" />
+                                      <span>Copy</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
 
                             {/* Execution Trail */}
@@ -918,7 +1137,9 @@ export function ChatShell() {
                 {/* SINGLE PERSISTENT COMPACT PROCESSING CONTAINER */}
                 {isProcessing && (
                   <div className="flex items-start space-x-3 transition-opacity duration-200">
-                    <div className="iridescent-orb-sm mt-1" />
+                    <div className="shrink-0 mt-0.5">
+                      <AnimatedBotAvatar size={36} />
+                    </div>
                     <div className="flex-1 bg-white dark:bg-[#151722] border border-slate-200 dark:border-[#232636] rounded-2xl p-3.5 space-y-2 shadow-md">
                       <div className="flex items-center justify-between text-xs border-b border-slate-200/80 dark:border-[#202330] pb-2">
                         <div className="flex items-center space-x-2">
@@ -969,28 +1190,28 @@ export function ChatShell() {
                     className="w-full bg-transparent text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-medium"
                   />
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80">
+                    <div className="flex items-center space-x-2 min-w-0 flex-1 overflow-hidden">
                       <button
                         type="button"
                         onClick={handleBatchIngest}
                         disabled={isIngesting}
                         title="Batch Ingest PDFs (/ingest-all)"
-                        className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-50 border border-slate-200/60 dark:border-slate-700/60 transition-all"
+                        className="p-2 rounded-full shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-50 border border-slate-200/60 dark:border-slate-700/60 transition-all"
                       >
                         {isIngesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-500" /> : <Paperclip className="w-3.5 h-3.5" />}
                       </button>
 
-                      <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-[200px] sm:max-w-xs">
+                      <div className="flex items-center gap-1.5 overflow-x-auto py-1 no-scrollbar scroll-smooth">
                         {['ALL', 'AI Governance', 'Banking Operations', 'Compliance'].map((dept) => (
                           <button
                             key={dept}
                             type="button"
                             onClick={() => setActiveDepartment(dept)}
-                            className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 transition-all ${
                               activeDepartment === dept
-                                ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-slate-950 font-bold'
-                                : 'bg-slate-100/90 hover:bg-slate-200 dark:bg-slate-800/70 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                                ? 'bg-slate-900 text-white dark:bg-sky-500 dark:text-slate-950 font-semibold shadow-xs'
+                                : 'bg-slate-100/90 hover:bg-slate-200 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-slate-700/60'
                             }`}
                           >
                             {dept === 'ALL' ? 'All' : dept}
@@ -1003,7 +1224,7 @@ export function ChatShell() {
                       type="button"
                       onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim() || isProcessing}
-                      className="px-5 py-2 rounded-full font-bold text-xs sm:text-sm flex items-center space-x-2 transition-all duration-200 shadow-md active:scale-95 disabled:opacity-40
+                      className="px-5 py-2 rounded-full font-bold text-xs sm:text-sm flex items-center space-x-2 transition-all duration-200 shadow-md active:scale-95 disabled:opacity-40 shrink-0
                         bg-slate-900 hover:bg-slate-800 text-white dark:bg-gradient-to-r dark:from-sky-500 dark:via-blue-600 dark:to-indigo-600 dark:hover:from-sky-400 dark:hover:to-indigo-500 dark:shadow-sky-500/25"
                     >
                       <span>Generate</span>

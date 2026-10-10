@@ -63,3 +63,43 @@ class RAGAskResponse(BaseModel):
         default=None,
         description="Rule-based post-generation output guardrail validation result"
     )
+
+
+class AgentAskRequest(RAGAskRequest):
+    """
+    Unified entry-point request schema for multi-agent routing.
+    Inherits query and optional department_filter from RAGAskRequest.
+    """
+    pass
+
+
+class AgentAskResponse(BaseModel):
+    """
+    Unified entry-point response schema returned by the Router/Orchestrator agent.
+    Includes the 'routed_to' field indicating which specialized sub-agent handled the request.
+    """
+    query: str = Field(..., description="Original user query")
+    department_filter: Optional[str] = Field(default=None, description="Department pre-filter applied")
+    routed_to: str = Field(
+        ...,
+        description="Specialized agent that processed the query (e.g., 'rag_retriever', 'not_supported')"
+    )
+    answer: str = Field(..., description="Answer from specialized agent or routing fallback message")
+    citations: list[CitationItem] = Field(default_factory=list, description="List of source document citations")
+    retrieved_chunks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Raw retrieved context chunks for transparency & debugging"
+    )
+    security_check: SecurityCheckResult = Field(
+        ...,
+        description="Rule-based pre-retrieval security audit validation result for auditability and transparency"
+    )
+    output_check: Optional[SecurityCheckResult] = Field(
+        default=None,
+        description="Rule-based post-generation output guardrail validation result"
+    )
+
+
+# Type alias for Router responses
+RouterAskResponse = AgentAskResponse
+

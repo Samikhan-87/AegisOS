@@ -25,8 +25,9 @@ def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 
 
     base_url = os.getenv("OLLAMA_BASE_URL", settings.OLLAMA_BASE_URL).rstrip("/")
     target_model = model or os.getenv("OLLAMA_MODEL", settings.OLLAMA_MODEL)
-    max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "256"))
-    context_size = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
+    effective_timeout = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", str(timeout_seconds)))
+    max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "160"))
+    context_size = int(os.getenv("OLLAMA_NUM_CTX", "1536"))
 
     endpoint = f"{base_url}/api/generate"
     payload = {
@@ -43,7 +44,15 @@ def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 
     }
 
     try:
-        with httpx.Client(timeout=timeout_seconds) as client:
+        # Explicit timeout configuration ensuring full read timeout is granted to Ollama
+        client_timeout = httpx.Timeout(
+            effective_timeout,
+            connect=60.0,
+            read=effective_timeout,
+            write=60.0,
+            pool=effective_timeout,
+        )
+        with httpx.Client(timeout=client_timeout) as client:
             response = client.post(endpoint, json=payload)
             response.raise_for_status()
             data = response.json()
@@ -57,12 +66,14 @@ def call_ollama(prompt: str, model: str | None = None, timeout_seconds: float = 
         logger.error(error_msg)
         return error_msg
 
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as te:
+        timeout_name = type(te).__name__
         error_msg = (
-            f"Error: Ollama generation timed out after {timeout_seconds} seconds using model '{target_model}'. "
-            "Local CPU inference can be slow — consider using a smaller model (e.g., 'gemma2:2b' or 'llama3.2:1b')."
+            f"Error: Ollama generation timed out ({timeout_name}) after {effective_timeout} seconds using model '{target_model}'. "
+            "Local CPU inference can be slow — consider using a faster model (e.g. 'qwen2.5:3b' or 'llama3.2:1b') "
+            "or increasing OLLAMA_TIMEOUT_SECONDS."
         )
-        logger.error(error_msg)
+        logger.error(f"{error_msg} Details: {repr(te)}")
         return error_msg
 
     except httpx.HTTPStatusError as hse:
